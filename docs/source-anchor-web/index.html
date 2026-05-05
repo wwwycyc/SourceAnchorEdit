@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Source Anchor Studio</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="headline-group">
+          <p class="eyebrow">Source Anchor / 无弱提示</p>
+          <h1>Source Anchor Studio</h1>
+          <p class="lead">上传图片，输入指令，直接生成编辑结果。</p>
+        </div>
+        <div class="badge-row">
+          <span class="badge">方法：<strong>source_anchor</strong></span>
+          <span class="badge">ROI：<strong>启用</strong></span>
+          <span class="badge">尺寸：<strong>512 x 512</strong></span>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <section class="dashboard-column left-column">
+          <article class="panel preview-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">输入预览</p>
+                <h2>源图</h2>
+              </div>
+              <span id="apiModeBadge" class="mode-badge">等待运行</span>
+            </div>
+            <div id="previewStage" class="preview-stage preview-stage-small empty">
+              <img id="previewImage" alt="上传预览图" hidden />
+              <div id="previewPlaceholder" class="preview-placeholder">
+                <span class="preview-placeholder-mark">512</span>
+                <p>上传后会显示在这里。</p>
+              </div>
+            </div>
+            <div class="meta-grid compact-grid">
+              <div class="meta-cell">
+                <span class="meta-label">文件</span>
+                <strong id="fileNameValue">未选择图片</strong>
+              </div>
+              <div class="meta-cell">
+                <span class="meta-label">原始尺寸</span>
+                <strong id="originalSizeValue">-</strong>
+              </div>
+              <div class="meta-cell">
+                <span class="meta-label">处理后</span>
+                <strong id="processedSizeValue">512 x 512</strong>
+              </div>
+              <div class="meta-cell">
+                <span class="meta-label">Anchor</span>
+                <strong id="anchorValueMirror">0.00</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel control-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">参数</p>
+                <h2>运行设置</h2>
+              </div>
+            </div>
+            <div class="control-stack">
+              <label class="slider-block" for="sourceAnchorStartInput">
+                <span class="slider-label-row">
+                  <span>source_anchor_start</span>
+                  <strong id="anchorValueDisplay">0.00</strong>
+                </span>
+                <input id="sourceAnchorStartInput" type="range" min="0" max="1" step="0.01" value="0.00" />
+              </label>
+              <label class="slider-block" for="sharedStepsInput">
+                <span class="slider-label-row">
+                  <span>统一步数</span>
+                  <strong id="stepsValueDisplay">5</strong>
+                </span>
+                <input id="sharedStepsInput" type="range" min="4" max="30" step="1" value="5" />
+                <p class="control-note">反演步数 = 编辑步数</p>
+              </label>
+              <div class="toggle-row">
+                <span>失败时回退规则模式</span>
+                <button id="mockToggleButton" class="toggle-button active" type="button">开启</button>
+              </div>
+              <div class="summary-card">
+                <span>显存配置</span>
+                <strong>float16 + slicing + batch 1</strong>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="dashboard-column center-column">
+          <article class="panel result-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">结果</p>
+                <h2>编辑后图片</h2>
+              </div>
+            </div>
+            <div id="resultStage" class="preview-stage result-stage empty">
+              <img id="resultImage" alt="编辑结果图" hidden />
+              <div id="resultPlaceholder" class="preview-placeholder">
+                <span class="preview-placeholder-mark">OUT</span>
+                <p>生成后的图片会显示在这里。</p>
+              </div>
+            </div>
+            <div class="result-actions">
+              <a id="openEditedLink" class="ghost-link disabled" href="#" target="_blank" rel="noreferrer">打开编辑图</a>
+            </div>
+          </article>
+        </section>
+
+        <section class="dashboard-column right-column">
+          <article class="panel activity-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">流程</p>
+                <h2>运行状态</h2>
+              </div>
+              <button id="clearLogButton" class="ghost-button" type="button">清空</button>
+            </div>
+            <div class="step-grid step-grid-compact">
+              <div class="step-card" id="step-source">
+                <span class="step-index">01</span>
+                <strong>识图</strong>
+                <p>生成英文 source prompt。</p>
+              </div>
+              <div class="step-card" id="step-target">
+                <span class="step-index">02</span>
+                <strong>Prompt</strong>
+                <p>翻译指令并生成 target prompt。</p>
+              </div>
+              <div class="step-card" id="step-backend">
+                <span class="step-index">03</span>
+                <strong>编辑</strong>
+                <p>运行 source_anchor 并返回结果。</p>
+              </div>
+            </div>
+            <div id="activityLog" class="activity-log compact-log" aria-live="polite"></div>
+          </article>
+
+          <article class="panel prompt-panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Prompt</p>
+                <h2>文本结果</h2>
+              </div>
+            </div>
+            <div class="prompt-box">
+              <span>source prompt</span>
+              <pre id="sourcePromptOutput">等待识图...</pre>
+            </div>
+            <div class="prompt-box">
+              <span>translated instruction</span>
+              <pre id="translatedInstructionOutput">等待指令翻译...</pre>
+            </div>
+            <div class="prompt-box">
+              <span>target prompt</span>
+              <pre id="targetPromptOutput">等待 target prompt 生成...</pre>
+            </div>
+          </article>
+        </section>
+      </main>
+
+      <form id="composerForm" class="composer" novalidate>
+        <div class="composer-toolbar">
+          <label class="upload-chip" for="imageInput">
+            <input id="imageInput" type="file" accept="image/*" hidden />
+            <span class="upload-icon">+</span>
+            <span>上传图片</span>
+          </label>
+          <div class="toolbar-note">输入会统一处理成 512 x 512。</div>
+        </div>
+        <div class="composer-body">
+          <textarea
+            id="instructionInput"
+            rows="3"
+            placeholder="输入编辑指令，例如：把猫改成狗，其余不变。"
+          ></textarea>
+          <button id="runButton" class="run-button" type="submit">
+            <span class="run-button-label">开始生成</span>
+            <span class="run-button-subtitle">识图 -> prompt -> source_anchor</span>
+          </button>
+        </div>
+        <p id="formError" class="form-error" aria-live="assertive"></p>
+      </form>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

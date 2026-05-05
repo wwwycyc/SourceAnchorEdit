@@ -1,0 +1,11 @@
+{
+  "sample_id": "single_case_0001",
+  "source_image_path": "source.png",
+  "source_prompt": "a long-haired tabby cat sitting on a wooden chair indoors",
+  "target_prompt": "a long-haired dog sitting on a wooden chair indoors",
+  "metadata": {
+    "dataset": "custom",
+    "record_id": "single_case_0001",
+    "edit_instruction": "change the cat to a dog, keep everything else unchanged"
+  }
+}

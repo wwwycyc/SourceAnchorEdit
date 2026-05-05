@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+runs/
+dist/
+build/
+*.egg-info/
+*.local.yaml
+*.local.yml
+*.local.json

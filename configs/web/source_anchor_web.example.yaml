@@ -1,0 +1,15 @@
+web_demo:
+  mimo:
+    base_url: "https://token-plan-cn.xiaomimimo.com/v1"
+    model: "mimo-v2.5"
+    api_key: ""
+  source_anchor:
+    sd_model: "runwayml/stable-diffusion-v1-5"
+    clip_model: "openai/clip-vit-large-patch14"
+    ntip2p_root: "/abs/path/to/NTIP2P"
+    num_steps: 5
+    dtype: "float16"
+    attention_slicing: true
+    vae_slicing: true
+    channels_last: true
+    enable_tf32: true

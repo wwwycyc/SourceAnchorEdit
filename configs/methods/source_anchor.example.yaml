@@ -1,0 +1,20 @@
+method:
+  name: source_anchor
+  no_target_hints: true
+  source_anchor_start: 0.25
+  num_inversion_steps: 10
+  num_edit_steps: 10
+  guidance_scale: 7.5
+  soft_roi_start_weight: 0.75
+  soft_roi_end_weight: 0.10
+  anchor_hardness_start: 0.35
+  anchor_hardness_end: 1.0
+  discrepancy_weight: 0.55
+  attention_weight: 0.30
+  latent_weight: 0.15
+  temperature: 8.0
+  threshold: 0.35
+  min_value: 0.0
+  max_value: 1.0
+  smoothing_kernel: 5
+  attention_locations: ["down", "mid", "up"]

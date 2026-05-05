@@ -1,0 +1,37 @@
+experiment:
+  input_manifest: ../../examples/single_case/sample.json
+  output_root: ../../runs/source_anchor_demo
+
+method:
+  config: ../methods/source_anchor.example.yaml
+
+models:
+  config: ../models/local_models.example.yaml
+
+roi:
+  source: live
+  cache_root: null
+  save_cache: false
+  threshold: 0.5
+  num_maps_per_mask: 1
+  mask_encode_strength: 0.5
+  mask_thresholding_ratio: 3.0
+
+runtime:
+  device: cuda
+  dtype: float16
+  batch_size: 1
+  local_files_only: true
+  attention_slicing: true
+  vae_slicing: true
+  channels_last: true
+  enable_tf32: true
+  enable_cpu_offload: false
+  enable_xformers: false
+
+save:
+  roi_cache: false
+  inversion_tensors: false
+  debug_json: true
+  step_visualizations: false
+  overview: true
