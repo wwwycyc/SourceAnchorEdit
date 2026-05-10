@@ -1,0 +1,6 @@
+node_modules
+dist
+.vite
+.env.local
+vite.out.log
+vite.err.log

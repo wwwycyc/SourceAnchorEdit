@@ -341,13 +341,18 @@ def call_mimo_chat_completion_with_retry(messages: list[dict], *, max_completion
 
 def generate_source_prompt_with_mimo(*, image_base64: str, image_mime_type: str) -> str:
     image_url = f"data:{image_mime_type};base64,{image_base64}"
-    response_text = call_mimo_chat_completion(
+    response_text = call_mimo_chat_completion_with_retry(
         [
             {
                 "role": "system",
                 "content": (
-                    "You generate concise English source prompts for image editing pipelines. "
-                    "Return only one English prompt sentence. No bullets, no labels, no markdown, no quotes."
+                    "You generate English source prompts for an image editing pipeline. "
+                    "Your description will be used as the baseline for editing, so describe the image in a way that "
+                    "makes it easy to precisely specify edits later. "
+                    "Capture distinctive visual details, spatial relationships between objects, materials and textures, "
+                    "lighting and shadows, colors, and the overall atmosphere. "
+                    "Use natural, concrete language. Avoid vague terms like 'nice' or 'beautiful'. "
+                    "Output only the prompt text itself — no markdown, no headings, no labels, no quotes, no prefixes."
                 ),
             },
             {
@@ -362,9 +367,9 @@ def generate_source_prompt_with_mimo(*, image_base64: str, image_mime_type: str)
                     {
                         "type": "text",
                         "text": (
-                            "Describe the uploaded image as a concise English source prompt for image editing. "
-                            "Focus on subject, clothing, pose, scene, lighting, camera view, and overall style. "
-                            "Return one sentence only."
+                            "Describe this image as an English source prompt for image editing. "
+                            "Focus on details that would help an editor know exactly what to change and what to keep. "
+                            "Return only the prompt text."
                         ),
                     },
                 ],
@@ -384,13 +389,15 @@ def translate_instruction_with_mimo(*, user_instruction: str) -> str:
             {
                 "role": "system",
                 "content": (
-                    "Translate the user's image-edit instruction into concise natural English. "
-                    "Return only one English sentence. No JSON, no bullets, no quotes."
+                    "Translate the user's image-edit instruction into natural English. "
+                    "Preserve all details and constraints from the original instruction. "
+                    "Use clear, actionable language suitable for an image editing pipeline. "
+                    "Output only the translated instruction text — no markdown, no headings, no labels, no quotes, no prefixes."
                 ),
             },
             {
                 "role": "user",
-                "content": f"User instruction:\n{user_instruction}",
+                "content": f"Translate the following user instruction into English:\n{user_instruction}\n\nReturn only the translated text.",
             },
         ],
         max_completion_tokens=160,
@@ -409,7 +416,8 @@ def compose_target_prompt_with_mimo(*, source_prompt: str, translated_instructio
                 "content": (
                     "You are helping an image editing pipeline. "
                     "Rewrite the source prompt so it reflects the requested edit while preserving all unmentioned details. "
-                    "Return only one English prompt sentence. No JSON, no bullets, no quotes."
+                    "The output should match the level of detail and style of the source prompt. "
+                    "Output only the target prompt text — no markdown, no headings, no labels, no quotes, no prefixes."
                 ),
             },
             {
@@ -419,7 +427,7 @@ def compose_target_prompt_with_mimo(*, source_prompt: str, translated_instructio
                     f"{source_prompt}\n\n"
                     "Translated edit instruction:\n"
                     f"{translated_instruction}\n\n"
-                    "Return the final English target prompt only."
+                    "Return the final English target prompt text only."
                 ),
             },
         ],
