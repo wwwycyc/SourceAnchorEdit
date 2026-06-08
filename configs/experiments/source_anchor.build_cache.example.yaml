@@ -17,6 +17,11 @@ roi:
   mask_encode_strength: 0.5
   mask_thresholding_ratio: 3.0
 
+inversion:
+  source: live
+  cache_root: ../../runs/source_anchor_demo/inversion_cache
+  save_cache: true
+
 runtime:
   device: cuda
   dtype: float16

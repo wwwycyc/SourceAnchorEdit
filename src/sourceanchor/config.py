@@ -43,6 +43,13 @@ class RoiConfig:
 
 
 @dataclass
+class InversionConfig:
+    source: str = "live"
+    cache_root: Path | None = None
+    save_cache: bool = False
+
+
+@dataclass
 class ModelConfig:
     sd_model: str | None = None
     clip_model: str | None = None
@@ -74,14 +81,34 @@ class SaveConfig:
 
 
 @dataclass
+class MetricsConfig:
+    """Configuration for metrics calculation."""
+    enable_metrics: bool = False
+    enable_lpips: bool = True
+    enable_psnr: bool = True
+    enable_mse: bool = True
+    enable_ssim: bool = True
+    enable_clip_score: bool = True
+    enable_structure_distance: bool = False
+    enable_locality_ratio: bool = True
+    lpips_net: str = "squeeze"
+    clip_model_id: str = "openai/clip-vit-large-patch14"
+    clip_local_files_only: bool = True
+    dino_model_name: str = "dino_vits8"
+    dino_global_patch_size: int = 224
+
+
+@dataclass
 class ExperimentConfig:
     input_manifest: Path
     output_root: Path
     method: MethodConfig = field(default_factory=MethodConfig)
     roi: RoiConfig = field(default_factory=RoiConfig)
+    inversion: InversionConfig = field(default_factory=InversionConfig)
     models: ModelConfig = field(default_factory=ModelConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     save: SaveConfig = field(default_factory=SaveConfig)
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -216,6 +243,21 @@ def load_roi_config(mapping: dict[str, Any], *, base_dir: Path) -> RoiConfig:
     return config
 
 
+def load_inversion_config(mapping: dict[str, Any], *, base_dir: Path) -> InversionConfig:
+    source = str(mapping.get("source", "live")).strip().lower()
+    if source not in {"live", "cache"}:
+        raise ValueError(f"inversion.source must be 'live' or 'cache', got: {source}")
+    cache_root = _resolve_optional_path(mapping.get("cache_root"), base_dir=base_dir)
+    config = InversionConfig(
+        source=source,
+        cache_root=cache_root,
+        save_cache=bool(mapping.get("save_cache", False)),
+    )
+    if config.source == "cache" and config.cache_root is None:
+        raise ValueError("inversion.cache_root must be configured when inversion.source=cache")
+    return config
+
+
 def load_model_config(mapping: dict[str, Any], *, base_dir: Path) -> ModelConfig:
     sd_model = mapping.get("sd_model")
     clip_model = mapping.get("clip_model")
@@ -271,6 +313,25 @@ def load_save_config(mapping: dict[str, Any]) -> SaveConfig:
     )
 
 
+def load_metrics_config(mapping: dict[str, Any]) -> MetricsConfig:
+    """Load metrics configuration from YAML mapping."""
+    return MetricsConfig(
+        enable_metrics=bool(mapping.get("enable_metrics", False)),
+        enable_lpips=bool(mapping.get("enable_lpips", True)),
+        enable_psnr=bool(mapping.get("enable_psnr", True)),
+        enable_mse=bool(mapping.get("enable_mse", True)),
+        enable_ssim=bool(mapping.get("enable_ssim", True)),
+        enable_clip_score=bool(mapping.get("enable_clip_score", True)),
+        enable_structure_distance=bool(mapping.get("enable_structure_distance", False)),
+        enable_locality_ratio=bool(mapping.get("enable_locality_ratio", True)),
+        lpips_net=str(mapping.get("lpips_net", "squeeze")),
+        clip_model_id=str(mapping.get("clip_model_id", "openai/clip-vit-large-patch14")),
+        clip_local_files_only=bool(mapping.get("clip_local_files_only", True)),
+        dino_model_name=str(mapping.get("dino_model_name", "dino_vits8")),
+        dino_global_patch_size=int(mapping.get("dino_global_patch_size", 224)),
+    )
+
+
 def load_experiment_config(path: str | Path) -> ExperimentConfig:
     config_path = Path(path).expanduser().resolve()
     payload = _load_mapping_file(config_path)
@@ -290,7 +351,9 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
         output_root=_resolve_optional_path(experiment_block["output_root"], base_dir=base_dir) or Path(),
         method=load_method_config(method_mapping),
         roi=load_roi_config(dict(payload.get("roi") or {}), base_dir=base_dir),
+        inversion=load_inversion_config(dict(payload.get("inversion") or {}), base_dir=base_dir),
         models=load_model_config(model_mapping, base_dir=model_base_dir),
         runtime=load_runtime_config(dict(payload.get("runtime") or {})),
         save=load_save_config(dict(payload.get("save") or {})),
+        metrics=load_metrics_config(dict(payload.get("metrics") or {})),
     )

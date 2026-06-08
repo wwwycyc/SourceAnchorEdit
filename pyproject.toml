@@ -7,7 +7,7 @@ name = "sourceanchor"
 version = "0.1.0"
 description = "Standalone source-anchor release scaffold"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
   "diffusers==0.37.0",
   "transformers==5.3.0",

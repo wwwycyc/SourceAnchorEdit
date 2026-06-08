@@ -1,6 +1,6 @@
 experiment:
   input_manifest: ../../examples/single_case/sample.json
-  output_root: ../../runs/source_anchor_demo_cache
+  output_root: ../../runs/source_anchor_demo
 
 method:
   config: ../methods/source_anchor.example.yaml
@@ -9,8 +9,8 @@ models:
   config: ../models/local_models.example.yaml
 
 roi:
-  source: cache
-  cache_root: ../../runs/source_anchor_demo/roi_cache
+  source: live
+  cache_root: null
   save_cache: false
   threshold: 0.5
   num_maps_per_mask: 1
@@ -18,8 +18,8 @@ roi:
   mask_thresholding_ratio: 3.0
 
 inversion:
-  source: cache
-  cache_root: ../../runs/source_anchor_demo/inversion_cache
+  source: live
+  cache_root: null
   save_cache: false
 
 runtime:
@@ -33,6 +33,21 @@ runtime:
   enable_tf32: true
   enable_cpu_offload: false
   enable_xformers: false
+
+metrics:
+  enable_metrics: true  # Enable metrics computation
+  enable_lpips: true
+  enable_psnr: true
+  enable_mse: true
+  enable_ssim: true
+  enable_clip_score: true
+  enable_structure_distance: false
+  enable_locality_ratio: true
+  lpips_net: squeeze
+  clip_model_id: openai/clip-vit-large-patch14
+  clip_local_files_only: true
+  dino_model_name: dino_vits8
+  dino_global_patch_size: 224
 
 save:
   roi_cache: false

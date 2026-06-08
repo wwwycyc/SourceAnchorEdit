@@ -17,6 +17,11 @@ roi:
   mask_encode_strength: 0.5
   mask_thresholding_ratio: 3.0
 
+inversion:
+  source: live
+  cache_root: null
+  save_cache: false
+
 runtime:
   device: cuda
   dtype: float16
@@ -28,6 +33,21 @@ runtime:
   enable_tf32: true
   enable_cpu_offload: false
   enable_xformers: false
+
+metrics:
+  enable_metrics: false  # Set to true to compute metrics (requires CLIP model)
+  enable_lpips: true
+  enable_psnr: true
+  enable_mse: true
+  enable_ssim: true
+  enable_clip_score: true
+  enable_structure_distance: false
+  enable_locality_ratio: true
+  lpips_net: squeeze
+  clip_model_id: openai/clip-vit-large-patch14
+  clip_local_files_only: true
+  dino_model_name: dino_vits8
+  dino_global_patch_size: 224
 
 save:
   roi_cache: false

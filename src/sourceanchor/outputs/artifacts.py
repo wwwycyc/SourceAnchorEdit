@@ -23,3 +23,9 @@ def roi_cache_dir(cache_root: str | Path, sample_id: str) -> Path:
     path = Path(cache_root).expanduser().resolve() / sample_id
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def inversion_cache_dir(cache_root: str | Path, sample_id: str) -> Path:
+    path = Path(cache_root).expanduser().resolve() / sample_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path

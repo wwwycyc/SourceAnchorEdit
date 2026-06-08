@@ -71,11 +71,16 @@ class AttentionStore:
             Dictionary mapping location keys to lists of averaged attention tensors.
         """
         if self.cur_step == 0:
-            return self.attention_store
-        return {
+            return self.step_store
+
+        averaged = {
             key: [item / self.cur_step for item in self.attention_store[key]]
             for key in self.attention_store
         }
+        for key, current_items in self.step_store.items():
+            if current_items:
+                averaged[key] = current_items
+        return averaged
 
     def reset(self):
         """Clear all stored attention and reset counter."""

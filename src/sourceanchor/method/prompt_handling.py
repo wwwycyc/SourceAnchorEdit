@@ -112,9 +112,14 @@ def aggregate_step_cross_attention(attention_store, token_mask: torch.Tensor, ta
             resolution = int(math.sqrt(pixel_count))
             if resolution * resolution != pixel_count:
                 continue
-            if item.shape[0] % batch_size != 0:
+            if item.shape[0] % (batch_size * 2) == 0:
+                head_count = item.shape[0] // (batch_size * 2)
+                reshaped = item.reshape(2 * batch_size, head_count, resolution, resolution, item.shape[-1])
+                reshaped = reshaped[batch_size:]
+            elif item.shape[0] % batch_size == 0:
+                reshaped = item.reshape(batch_size, -1, resolution, resolution, item.shape[-1])
+            else:
                 continue
-            reshaped = item.reshape(batch_size, -1, resolution, resolution, item.shape[-1])
             token_weights = token_mask.to(reshaped.device)[:, None, None, None, :]
             token_map = (reshaped * token_weights).sum(dim=-1) / token_weights.sum(dim=-1).clamp(min=1.0)
             pooled = token_map.mean(dim=1, keepdim=True)

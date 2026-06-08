@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from sourceanchor.config import ExperimentConfig, MethodConfig, RoiConfig
-from sourceanchor.inversion import DDIMInversionBackend, InversionOutput
+from sourceanchor.inversion import DDIMInversionBackend, InversionOutput, load_inversion_output, save_inversion_output
 from sourceanchor.method.dynamic_mask import DynamicMaskBuilder
 from sourceanchor.method.prompt_handling import (
     PromptConditionSourcePredictor,
@@ -17,7 +17,17 @@ from sourceanchor.method.prompt_handling import (
     build_full_target_token_mask,
 )
 from sourceanchor.method.source_anchor import build_anchor_mask, build_effective_mask
-from sourceanchor.outputs import make_run_dir, roi_cache_dir, sample_dir, should_save_overview, should_save_roi_cache, write_json
+from sourceanchor.metrics import MetricsCalculator
+from sourceanchor.outputs import (
+    inversion_cache_dir,
+    make_run_dir,
+    roi_cache_dir,
+    sample_dir,
+    should_save_inversion_tensors,
+    should_save_overview,
+    should_save_roi_cache,
+    write_json,
+)
 from sourceanchor.outputs.writer import compose_simple_overview, save_image
 from sourceanchor.roi.cache import load_cached_roi
 from sourceanchor.roi.live import generate_live_roi
@@ -35,6 +45,7 @@ class EditArtifacts:
     sample_output_dir: Path
     edited_image_path: Path
     source_reconstruction_path: Path
+    inversion_cache_dir: Path | None
     overview_path: Path | None
     roi_soft_path: Path | None
     roi_hard_path: Path | None
@@ -46,6 +57,8 @@ def build_run_manifest_payload(config: ExperimentConfig, artifacts: list[EditArt
         "method": config.method.name,
         "roi_source": config.roi.source,
         "roi_cache_root": str(config.roi.cache_root) if config.roi.cache_root is not None else None,
+        "inversion_source": config.inversion.source,
+        "inversion_cache_root": str(config.inversion.cache_root) if config.inversion.cache_root is not None else None,
         "sample_count": len(artifacts),
         "samples": [
             {
@@ -54,6 +67,7 @@ def build_run_manifest_payload(config: ExperimentConfig, artifacts: list[EditArt
                 "sample_json_path": str(item.sample_output_dir / "sample.json"),
                 "edited_image_path": str(item.edited_image_path),
                 "source_reconstruction_path": str(item.source_reconstruction_path),
+                "inversion_cache_dir": str(item.inversion_cache_dir) if item.inversion_cache_dir is not None else None,
                 "overview_path": str(item.overview_path) if item.overview_path is not None else None,
                 "roi_soft_path": str(item.roi_soft_path) if item.roi_soft_path is not None else None,
                 "roi_hard_path": str(item.roi_hard_path) if item.roi_hard_path is not None else None,
@@ -81,6 +95,18 @@ class SourceAnchorEditor:
         configure_inversion_module(self.ntip2p, self.pipe, config.method)
         self.attention_store = self.ntip2p.AttentionStore()
         self._register_attention_store()
+
+        # Initialize metrics calculator if enabled
+        self.metrics_calculator = None
+        if config.metrics.enable_metrics:
+            self.metrics_calculator = MetricsCalculator(
+                device=config.runtime.device,
+                clip_model_id=config.metrics.clip_model_id,
+                lpips_net=config.metrics.lpips_net,
+                clip_local_files_only=config.metrics.clip_local_files_only,
+                dino_model_name=config.metrics.dino_model_name,
+                dino_global_patch_size=config.metrics.dino_global_patch_size,
+            )
 
     def _restore_default_attention_processors(self) -> None:
         self.pipe.unet.set_attn_processor(dict(self._default_attn_processors))
@@ -156,15 +182,68 @@ class SourceAnchorEditor:
         save_image(hard_path, np.uint8(np.clip(hard_roi[0, 0].detach().cpu().numpy(), 0.0, 1.0) * 255.0))
         return soft_path, hard_path
 
+    @staticmethod
+    def _load_optional_mask(sample: StandardSample, fallback_hard_roi: torch.Tensor) -> tuple[np.ndarray | None, str]:
+        if sample.mask_path is not None:
+            if sample.mask_path.suffix.lower() == ".npy":
+                mask = np.load(sample.mask_path)
+            else:
+                from PIL import Image
+
+                mask = np.asarray(Image.open(sample.mask_path).convert("L"), dtype=np.float32)
+            mask = np.asarray(mask, dtype=np.float32)
+            if mask.max(initial=0) > 1.0:
+                mask = mask / 255.0
+            return np.clip(mask, 0.0, 1.0), "sample.mask_path"
+        mask = fallback_hard_roi[0, 0].detach().cpu().numpy().astype(np.float32)
+        return np.clip(mask, 0.0, 1.0), "roi.hard"
+
+    @staticmethod
+    def _load_optional_target_reference(sample: StandardSample) -> np.ndarray | None:
+        if sample.target_reference_path is None:
+            return None
+        return load_rgb_image(sample.target_reference_path)
+
+    def _default_inversion_cache_root(self) -> Path:
+        return (self.config.output_root / "inversion_cache").expanduser().resolve()
+
+    def _save_sample_inversion_tensors(self, run_dir: Path, sample: StandardSample, inversion: InversionOutput) -> None:
+        if should_save_inversion_tensors(self.config.save):
+            sample_cache_dir = sample_dir(run_dir, sample.sample_id) / "inversion_tensors"
+            save_inversion_output(sample_cache_dir, inversion)
+
+    def _load_or_run_inversion(self, sample: StandardSample, source_image: np.ndarray, run_dir: Path) -> tuple[InversionOutput, Path | None]:
+        cache_root = self.config.inversion.cache_root
+        cache_dir: Path | None = None
+        if self.config.inversion.source == "cache":
+            if cache_root is None:
+                raise ValueError("inversion.cache_root must be configured when inversion.source=cache")
+            cache_dir = Path(cache_root).expanduser().resolve() / sample.sample_id
+            inversion = load_inversion_output(cache_dir, device=self.pipe.device, dtype=self.pipe.unet.dtype)
+            self._save_sample_inversion_tensors(run_dir, sample, inversion)
+            return inversion, cache_dir
+
+        inversion = self.inversion_backend.invert(source_image, source_prompt=sample.source_prompt)
+        if self.config.inversion.save_cache:
+            cache_root = cache_root or self._default_inversion_cache_root()
+            cache_dir = inversion_cache_dir(cache_root, sample.sample_id)
+            save_inversion_output(cache_dir, inversion)
+
+        self._save_sample_inversion_tensors(run_dir, sample, inversion)
+
+        return inversion, cache_dir
+
     def run_sample(self, sample: StandardSample, run_dir: Path) -> EditArtifacts:
         sample_output_dir = sample_dir(run_dir, sample.sample_id)
         write_json(sample_output_dir / "sample.json", sample.to_dict())
         source_image = load_rgb_image(sample.source_image_path)
-        inversion = self.inversion_backend.invert(source_image, source_prompt=sample.source_prompt)
+        inversion, inversion_cache_path = self._load_or_run_inversion(sample, source_image, run_dir)
         source_reconstruction_path = save_image(sample_output_dir / "source_reconstruction.png", inversion.reconstruction_image)
         save_image(sample_output_dir / "source.png", source_image)
 
         soft_roi, hard_roi, roi_metadata = self._load_roi(sample)
+        metric_mask, metric_mask_source = self._load_optional_mask(sample, hard_roi)
+        target_reference = self._load_optional_target_reference(sample)
         roi_soft_path, roi_hard_path = self._save_roi_visuals(sample_output_dir, soft_roi, hard_roi)
 
         target_condition = self.prompt_encoder.encode(sample.target_prompt)
@@ -238,6 +317,29 @@ class SourceAnchorEditor:
         edited_image = self._decode_latents(latents)
         edited_image_path = save_image(sample_output_dir / "edited.png", edited_image)
 
+        # Compute metrics if enabled
+        metrics_result = {}
+        if self.metrics_calculator is not None:
+            try:
+                metrics_result = self.metrics_calculator.compute_all_metrics(
+                    source_image=source_image,
+                    edited_image=edited_image,
+                    target_prompt=sample.target_prompt if self.config.metrics.enable_clip_score else None,
+                    source_reconstruction=inversion.reconstruction_image,
+                    source_prompt=sample.source_prompt if self.config.metrics.enable_clip_score else None,
+                    target_reference=target_reference,
+                    edit_mask=metric_mask,
+                    enable_lpips=self.config.metrics.enable_lpips,
+                    enable_psnr=self.config.metrics.enable_psnr,
+                    enable_mse=self.config.metrics.enable_mse,
+                    enable_ssim=self.config.metrics.enable_ssim,
+                    enable_clip_score=self.config.metrics.enable_clip_score,
+                    enable_structure_distance=self.config.metrics.enable_structure_distance,
+                    enable_locality_ratio=self.config.metrics.enable_locality_ratio,
+                )
+            except Exception as e:
+                metrics_result = {"error": str(e)}
+
         overview_path: Path | None = None
         if should_save_overview(self.config.save):
             overview = compose_simple_overview(
@@ -257,9 +359,13 @@ class SourceAnchorEditor:
                 "source_prompt": sample.source_prompt,
                 "target_prompt": sample.target_prompt,
                 "roi_source": self.config.roi.source,
+                "inversion_source": self.config.inversion.source,
+                "inversion_cache_dir": str(inversion_cache_path) if inversion_cache_path is not None else None,
                 "roi_metadata": roi_metadata,
+                "metric_mask_source": metric_mask_source,
                 "inversion": inversion.metadata,
                 "steps": step_debug,
+                "metrics": metrics_result,  # Add metrics to debug output
             },
         )
         clear_cuda_memory()
@@ -268,6 +374,7 @@ class SourceAnchorEditor:
             sample_output_dir=sample_output_dir,
             edited_image_path=edited_image_path,
             source_reconstruction_path=source_reconstruction_path,
+            inversion_cache_dir=inversion_cache_path,
             overview_path=overview_path,
             roi_soft_path=roi_soft_path,
             roi_hard_path=roi_hard_path,

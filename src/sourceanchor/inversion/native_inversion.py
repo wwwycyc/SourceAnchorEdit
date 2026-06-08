@@ -83,11 +83,11 @@ class NativeInversion:
             Latent tensor of shape (1, 4, H//8, W//8)
         """
         if isinstance(image, Image.Image):
-            image = np.array(image)
+            image = np.array(image, copy=True)
 
         if isinstance(image, np.ndarray):
             # Convert from uint8 [0, 255] to float [-1, 1]
-            image = torch.from_numpy(image).float() / 127.5 - 1.0
+            image = torch.from_numpy(np.array(image, copy=True)).float() / 127.5 - 1.0
             # HWC -> CHW
             image = image.permute(2, 0, 1).unsqueeze(0)
 

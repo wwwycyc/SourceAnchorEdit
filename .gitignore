@@ -8,6 +8,7 @@ __pycache__/
 # Distribution / packaging
 dist/
 build/
+node_modules/
 *.egg-info/
 *.egg
 .eggs/
@@ -87,22 +88,22 @@ desktop.ini
 *.lnk
 
 # Project-specific outputs
-runs/
-outputs/
-logs/
+/runs/
+/outputs/
+/logs/
+/roi_cache/
+/inversion_cache/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
 
 # Local configuration files (contain secrets/paths)
 *.local.yaml
 *.local.yml
 *.local.json
 *_local.py
-
-# Model weights (uncomment if you don't want to track large model files)
-# *.pth
-# *.pt
-# *.ckpt
-# *.safetensors
-# *.bin
 
 # Temporary files
 *.tmp

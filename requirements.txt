@@ -16,6 +16,7 @@
 # Core runtime
 diffusers==0.37.0
 transformers==5.3.0
+huggingface_hub>=0.20.0
 ftfy
 
 # Data and metrics
