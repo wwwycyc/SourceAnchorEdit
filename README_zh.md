@@ -2,66 +2,177 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-这是一个围绕最终版 `source anchor` 方法整理出来的独立开源仓库。
+基于扩散模型的高保真图像编辑方法。
 
-当前仓库只保留一条最终主线：
+## 特性
 
-- source anchor
-- 无时序累计
-- 不引入弱提示信息
-- ROI 始终启用
-- ROI 来源支持 `live` 和 `cache`
+- 高保真度编辑：保持非编辑区域不变
+- 源锚定机制：确保背景结构稳定
+- 动态掩码：精准控制编辑区域
+- 支持 ROI 缓存加速
 
-核心实现位于 [src/sourceanchor](src/sourceanchor)。
+## 环境配置
 
-## 主要入口
+### 1. 安装依赖
 
-- 单样本运行：[scripts/run_single.py](scripts/run_single.py)
-- 批量运行：[scripts/run_batch.py](scripts/run_batch.py)
-- ROI cache 构建：[scripts/build_roi_cache.py](scripts/build_roi_cache.py)
-- 数据集转换：[scripts/convert_dataset.py](scripts/convert_dataset.py)
-- 本地可视化演示：[scripts/launch_web_demo.py](scripts/launch_web_demo.py)
+```bash
+# 安装 PyTorch（根据你的 CUDA 版本）
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-## 核心文档
+# 安装项目依赖
+pip install -r requirements.txt
+```
 
-- 输入格式：[docs/input_format.md](docs/input_format.md)
-- 配置说明：[docs/config.md](docs/config.md)
-- 方法说明：[docs/method.md](docs/method.md)
-- 复现说明：[docs/reproducibility.md](docs/reproducibility.md)
+或者使用可编辑模式安装：
+
+```bash
+pip install -e .
+```
+
+### 2. 配置模型路径
+
+复制并编辑配置文件：
+
+```bash
+cp configs/models/local_models.example.yaml configs/models/local_models.local.yaml
+```
+
+编辑 `local_models.local.yaml`，设置模型路径：
+
+```yaml
+models:
+  sd_model: runwayml/stable-diffusion-v1-5  # 或本地路径
+  clip_model: openai/clip-vit-large-patch14  # 或本地路径
+  dino_weights: null  # 可选
+```
 
 ## 快速开始
 
-运行最小样例：
+### 单样本编辑
 
-```powershell
-python scripts\run_single.py --config configs\experiments\source_anchor.demo.example.yaml
+```bash
+python scripts/run_single.py --config configs/experiments/source_anchor.demo.example.yaml
 ```
 
-构建 ROI cache：
+### 批量处理
 
-```powershell
-python scripts\build_roi_cache.py --config configs\experiments\source_anchor.build_cache.example.yaml
+```bash
+python scripts/run_batch.py --config configs/experiments/source_anchor.use_cache.example.yaml
 ```
 
-使用 cache 运行：
+### 构建 ROI 缓存（可选，加速重复实验）
 
-```powershell
-python scripts\run_single.py --config configs\experiments\source_anchor.use_cache.example.yaml
+```bash
+python scripts/build_roi_cache.py --config configs/experiments/source_anchor.build_cache.example.yaml
 ```
 
-启动本地可视化页面：
+### 启动 Web 演示
 
-```powershell
-python scripts\launch_web_demo.py
+```bash
+python scripts/launch_web_demo.py
 ```
 
-## 当前已包含
+然后在浏览器中打开显示的地址。
 
-- 分层配置加载
-- 标准样本格式
-- 单样本运行入口
-- 批量运行入口
-- ROI live/cache 工作流
-- ROI cache 构建脚本
-- PIE-Bench 数据集转换
-- 本地 Web demo 后端
+## 输入格式
+
+创建 `sample.json`：
+
+```json
+{
+  "sample_id": "example_001",
+  "source_image_path": "path/to/source.png",
+  "source_prompt": "a cat sitting on a chair",
+  "target_prompt": "a dog sitting on a chair",
+  "editing_region": "auto"
+}
+```
+
+详细格式说明见 [docs/input_format.md](docs/input_format.md)。
+
+## 输出结果
+
+运行后，结果保存在 `runs/` 目录：
+
+```
+runs/
+  source_anchor_<timestamp>/
+    samples/
+      <sample_id>/
+        source.png              # 原图
+        edited.png              # 编辑结果
+        source_reconstruction.png  # 重建图像
+        roi_soft.png            # ROI 可视化（软掩码）
+        roi_hard.png            # ROI 可视化（硬掩码）
+        overview.png            # 完整对比图
+        debug.json              # 调试信息
+```
+
+## 配置说明
+
+配置文件采用分层结构：
+
+- `configs/models/` - 模型路径配置
+- `configs/methods/` - 方法参数配置
+- `configs/experiments/` - 实验配置
+
+详细说明见 [docs/config.md](docs/config.md)。
+
+## 项目结构
+
+```
+source_anchor_release/
+├── configs/              # 配置文件
+├── docs/                 # 文档
+├── examples/             # 示例数据
+├── scripts/              # 运行脚本
+├── src/sourceanchor/     # 核心代码
+│   ├── inversion/        # 图像反演
+│   ├── method/           # 核心算法
+│   ├── roi/              # ROI 生成
+│   └── runtime/          # 运行时组件
+└── tools/                # 辅助工具
+```
+
+## 常见问题
+
+### 1. 如何使用本地模型？
+
+在 `local_models.local.yaml` 中设置本地路径：
+
+```yaml
+models:
+  sd_model: /path/to/stable-diffusion-v1-5
+  clip_model: /path/to/clip-vit-large-patch14
+```
+
+### 2. 如何调整编辑强度？
+
+在方法配置中调整 `guidance_scale`：
+
+```yaml
+method:
+  guidance_scale: 7.5  # 默认值，增大则编辑更强
+```
+
+### 3. GPU 内存不足怎么办？
+
+启用内存优化选项：
+
+```yaml
+runtime:
+  attention_slicing: true
+  vae_slicing: true
+  enable_cpu_offload: true  # 最激进的选项
+```
+
+## 许可证
+
+见 [LICENSE](LICENSE) 文件。
+
+## 相关文档
+
+- [输入格式说明](docs/input_format.md)
+- [配置详解](docs/config.md)
+- [方法说明](docs/method.md)
+- [复现指南](docs/reproducibility.md)

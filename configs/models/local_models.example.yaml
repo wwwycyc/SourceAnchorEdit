@@ -1,5 +1,5 @@
 models:
   sd_model: runwayml/stable-diffusion-v1-5
   clip_model: openai/clip-vit-large-patch14
-  ntip2p_root: /abs/path/to/NTIP2P
+  # ntip2p_root: /abs/path/to/NTIP2P  # No longer needed - using native implementation
   dino_weights: null

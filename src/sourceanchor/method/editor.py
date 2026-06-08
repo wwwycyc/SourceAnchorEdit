@@ -23,7 +23,7 @@ from sourceanchor.roi.cache import load_cached_roi
 from sourceanchor.roi.live import generate_live_roi
 from sourceanchor.roi.serialization import save_roi_payload
 from sourceanchor.runtime.device import clear_cuda_memory
-from sourceanchor.runtime.model_loader import configure_ntip2p_module, load_ntip2p_module
+from sourceanchor.runtime.model_loader import configure_inversion_module, create_native_inversion_module
 from sourceanchor.runtime.pipeline import build_main_pipeline, build_shared_diffedit_pipeline
 from sourceanchor.schemas import StandardSample
 from sourceanchor.utils.image import load_rgb_image
@@ -69,14 +69,16 @@ class SourceAnchorEditor:
         self.config = config
         self.pipe = build_main_pipeline(config.models, config.runtime)
         self._default_attn_processors = dict(self.pipe.unet.attn_processors)
+        # Store default processors on pipe for access by register_attention_control
+        self.pipe._default_attn_processors = self._default_attn_processors
         self.diffedit_pipe = build_shared_diffedit_pipeline(self.pipe, config.runtime, config.method)
         self.prompt_encoder = PromptEncoder(self.pipe)
         self.source_predictor = PromptConditionSourcePredictor(self.pipe)
         self.target_predictor = TargetPromptPredictor(self.pipe, self.prompt_encoder, config.method.guidance_scale)
         self.inversion_backend = DDIMInversionBackend(self.pipe, config.models, config.method)
         self.dynamic_mask_builder = DynamicMaskBuilder(config.method)
-        self.ntip2p = load_ntip2p_module(config.models)
-        configure_ntip2p_module(self.ntip2p, self.pipe, config.method)
+        self.ntip2p = create_native_inversion_module()
+        configure_inversion_module(self.ntip2p, self.pipe, config.method)
         self.attention_store = self.ntip2p.AttentionStore()
         self._register_attention_store()
 

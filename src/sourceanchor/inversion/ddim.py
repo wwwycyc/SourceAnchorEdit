@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from sourceanchor.config import MethodConfig, ModelConfig
-from sourceanchor.runtime.model_loader import configure_ntip2p_module, load_ntip2p_module
+from sourceanchor.runtime.model_loader import configure_inversion_module, create_native_inversion_module
 
 
 @dataclass
@@ -23,8 +23,8 @@ class DDIMInversionBackend:
         self.pipe = pipe
         self.models = models
         self.method = method
-        self.ntip2p = load_ntip2p_module(models)
-        configure_ntip2p_module(self.ntip2p, pipe, method)
+        self.ntip2p = create_native_inversion_module()
+        configure_inversion_module(self.ntip2p, pipe, method)
 
     @torch.no_grad()
     def invert(self, source_image: np.ndarray, source_prompt: str | None = None) -> InversionOutput:

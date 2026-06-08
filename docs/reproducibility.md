@@ -23,7 +23,6 @@ These must be configured through YAML files:
 
 - Stable Diffusion model
 - CLIP model
-- NTIP2P root
 - optional DINO weights
 
 Do not hard-code such paths inside the method implementation.

@@ -2,65 +2,177 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-This repository is being refactored toward a standalone, reproducible release centered on one final method line:
+High-fidelity image editing method based on diffusion models.
 
-- source anchor
-- no temporal accumulation
-- no weak prompt hints
-- ROI always enabled
-- ROI source can be `live` or `cache`
+## Features
 
-The new implementation lives under [src/sourceanchor](src/sourceanchor).
-The clean release files in this folder are intended to be uploaded as a separate GitHub repository.
+- High-fidelity editing: preserve non-edited regions
+- Source anchoring mechanism: ensure background structure stability
+- Dynamic masking: precise editing region control
+- Support ROI caching for acceleration
 
-## Main Entry Points
+## Setup
 
-- single-run CLI: [scripts/run_single.py](scripts/run_single.py)
-- batch-run CLI: [scripts/run_batch.py](scripts/run_batch.py)
-- ROI cache builder: [scripts/build_roi_cache.py](scripts/build_roi_cache.py)
-- dataset conversion: [scripts/convert_dataset.py](scripts/convert_dataset.py)
-- web demo launcher: [scripts/launch_web_demo.py](scripts/launch_web_demo.py)
+### 1. Install Dependencies
 
-## Core Docs
+```bash
+# Install PyTorch (adjust for your CUDA version)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-- input format: [docs/input_format.md](docs/input_format.md)
-- configuration layout: [docs/config.md](docs/config.md)
-- method overview: [docs/method.md](docs/method.md)
-- reproducibility notes: [docs/reproducibility.md](docs/reproducibility.md)
+# Install project dependencies
+pip install -r requirements.txt
+```
+
+Or install in editable mode:
+
+```bash
+pip install -e .
+```
+
+### 2. Configure Model Paths
+
+Copy and edit the configuration file:
+
+```bash
+cp configs/models/local_models.example.yaml configs/models/local_models.local.yaml
+```
+
+Edit `local_models.local.yaml` to set model paths:
+
+```yaml
+models:
+  sd_model: runwayml/stable-diffusion-v1-5  # or local path
+  clip_model: openai/clip-vit-large-patch14  # or local path
+  dino_weights: null  # optional
+```
 
 ## Quick Start
 
-Run the standalone example:
+### Single Sample Editing
 
-```powershell
-python scripts\run_single.py --config configs\experiments\source_anchor.demo.example.yaml
+```bash
+python scripts/run_single.py --config configs/experiments/source_anchor.demo.example.yaml
 ```
 
-Build ROI cache:
+### Batch Processing
 
-```powershell
-python scripts\build_roi_cache.py --config configs\experiments\source_anchor.build_cache.example.yaml
+```bash
+python scripts/run_batch.py --config configs/experiments/source_anchor.use_cache.example.yaml
 ```
 
-Run with cached ROI:
+### Build ROI Cache (optional, speeds up repeated experiments)
 
-```powershell
-python scripts\run_single.py --config configs\experiments\source_anchor.use_cache.example.yaml
+```bash
+python scripts/build_roi_cache.py --config configs/experiments/source_anchor.build_cache.example.yaml
 ```
 
-Launch the local visualization demo:
+### Launch Web Demo
 
-```powershell
-python scripts\launch_web_demo.py
+```bash
+python scripts/launch_web_demo.py
 ```
 
-## Included in This Release
+Then open the displayed URL in your browser.
 
-- layered config loading
-- standard sample format loading
-- standalone single-sample execution
-- batch execution entry point
-- ROI live/cache workflow
-- ROI cache builder
-- PIE-Bench dataset conversion
-- local web demo backend
+## Input Format
+
+Create a `sample.json`:
+
+```json
+{
+  "sample_id": "example_001",
+  "source_image_path": "path/to/source.png",
+  "source_prompt": "a cat sitting on a chair",
+  "target_prompt": "a dog sitting on a chair",
+  "editing_region": "auto"
+}
+```
+
+See [docs/input_format.md](docs/input_format.md) for details.
+
+## Output
+
+Results are saved in the `runs/` directory:
+
+```
+runs/
+  source_anchor_<timestamp>/
+    samples/
+      <sample_id>/
+        source.png              # original image
+        edited.png              # editing result
+        source_reconstruction.png  # reconstructed image
+        roi_soft.png            # ROI visualization (soft mask)
+        roi_hard.png            # ROI visualization (hard mask)
+        overview.png            # complete comparison
+        debug.json              # debug information
+```
+
+## Configuration
+
+Configuration files use a layered structure:
+
+- `configs/models/` - Model path configuration
+- `configs/methods/` - Method parameter configuration
+- `configs/experiments/` - Experiment configuration
+
+See [docs/config.md](docs/config.md) for details.
+
+## Project Structure
+
+```
+source_anchor_release/
+├── configs/              # Configuration files
+├── docs/                 # Documentation
+├── examples/             # Example data
+├── scripts/              # Run scripts
+├── src/sourceanchor/     # Core code
+│   ├── inversion/        # Image inversion
+│   ├── method/           # Core algorithms
+│   ├── roi/              # ROI generation
+│   └── runtime/          # Runtime components
+└── tools/                # Utility tools
+```
+
+## FAQ
+
+### 1. How to use local models?
+
+Set local paths in `local_models.local.yaml`:
+
+```yaml
+models:
+  sd_model: /path/to/stable-diffusion-v1-5
+  clip_model: /path/to/clip-vit-large-patch14
+```
+
+### 2. How to adjust editing strength?
+
+Adjust `guidance_scale` in method configuration:
+
+```yaml
+method:
+  guidance_scale: 7.5  # default, increase for stronger edits
+```
+
+### 3. Out of GPU memory?
+
+Enable memory optimization options:
+
+```yaml
+runtime:
+  attention_slicing: true
+  vae_slicing: true
+  enable_cpu_offload: true  # most aggressive option
+```
+
+## License
+
+See [LICENSE](LICENSE) file.
+
+## Documentation
+
+- [Input Format](docs/input_format.md)
+- [Configuration Guide](docs/config.md)
+- [Method Description](docs/method.md)
+- [Reproducibility Guide](docs/reproducibility.md)
