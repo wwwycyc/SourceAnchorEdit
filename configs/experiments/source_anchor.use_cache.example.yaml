@@ -34,6 +34,25 @@ runtime:
   enable_cpu_offload: false
   enable_xformers: false
 
+metrics:
+  enable_metrics: false
+  enable_lpips: true
+  enable_psnr: true
+  enable_mse: true
+  enable_ssim: true
+  enable_clip_score: true
+  enable_structure_distance: false
+  enable_locality_ratio: true
+  lpips_net: squeeze
+  clip_model_id: openai/clip-vit-large-patch14
+  clip_local_files_only: true
+  dino_model_name: dino_vits8
+  dino_global_patch_size: 224
+  dino_repo_or_dir: null
+  dino_cache_dir: ../../.cache/torch/hub
+  dino_weights_path: null
+  dino_local_files_only: true
+
 save:
   roi_cache: false
   inversion_tensors: false

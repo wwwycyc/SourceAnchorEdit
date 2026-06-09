@@ -1,6 +1,6 @@
 experiment:
-  input_manifest: ../../examples/single_case/sample.json
-  output_root: ../../runs/source_anchor_demo
+  input_manifest: ../../examples/two_case_manifest.json
+  output_root: ../../runs/source_anchor_batch2
 
 method:
   config: ../methods/source_anchor.example.yaml
@@ -25,7 +25,7 @@ inversion:
 runtime:
   device: cuda
   dtype: float16
-  batch_size: 1
+  batch_size: 2
   local_files_only: true
   attention_slicing: true
   vae_slicing: true
@@ -35,7 +35,7 @@ runtime:
   enable_xformers: false
 
 metrics:
-  enable_metrics: true  # Enable metrics computation
+  enable_metrics: false
   enable_lpips: true
   enable_psnr: true
   enable_mse: true

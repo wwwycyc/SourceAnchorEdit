@@ -96,6 +96,10 @@ class MetricsConfig:
     clip_local_files_only: bool = True
     dino_model_name: str = "dino_vits8"
     dino_global_patch_size: int = 224
+    dino_repo_or_dir: Path | None = None
+    dino_cache_dir: Path | None = None
+    dino_weights_path: Path | None = None
+    dino_local_files_only: bool = True
 
 
 @dataclass
@@ -313,7 +317,7 @@ def load_save_config(mapping: dict[str, Any]) -> SaveConfig:
     )
 
 
-def load_metrics_config(mapping: dict[str, Any]) -> MetricsConfig:
+def load_metrics_config(mapping: dict[str, Any], *, base_dir: Path) -> MetricsConfig:
     """Load metrics configuration from YAML mapping."""
     return MetricsConfig(
         enable_metrics=bool(mapping.get("enable_metrics", False)),
@@ -329,6 +333,10 @@ def load_metrics_config(mapping: dict[str, Any]) -> MetricsConfig:
         clip_local_files_only=bool(mapping.get("clip_local_files_only", True)),
         dino_model_name=str(mapping.get("dino_model_name", "dino_vits8")),
         dino_global_patch_size=int(mapping.get("dino_global_patch_size", 224)),
+        dino_repo_or_dir=_resolve_optional_path(mapping.get("dino_repo_or_dir"), base_dir=base_dir),
+        dino_cache_dir=_resolve_optional_path(mapping.get("dino_cache_dir"), base_dir=base_dir),
+        dino_weights_path=_resolve_optional_path(mapping.get("dino_weights_path"), base_dir=base_dir),
+        dino_local_files_only=bool(mapping.get("dino_local_files_only", True)),
     )
 
 
@@ -355,5 +363,5 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
         models=load_model_config(model_mapping, base_dir=model_base_dir),
         runtime=load_runtime_config(dict(payload.get("runtime") or {})),
         save=load_save_config(dict(payload.get("save") or {})),
-        metrics=load_metrics_config(dict(payload.get("metrics") or {})),
+        metrics=load_metrics_config(dict(payload.get("metrics") or {}), base_dir=base_dir),
     )

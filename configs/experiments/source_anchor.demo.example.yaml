@@ -48,6 +48,10 @@ metrics:
   clip_local_files_only: true
   dino_model_name: dino_vits8
   dino_global_patch_size: 224
+  dino_repo_or_dir: null
+  dino_cache_dir: ../../.cache/torch/hub
+  dino_weights_path: null
+  dino_local_files_only: true
 
 save:
   roi_cache: false

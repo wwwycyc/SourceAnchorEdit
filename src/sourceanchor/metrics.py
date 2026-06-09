@@ -20,18 +20,123 @@ from transformers import CLIPConfig, CLIPModel, CLIPProcessor
 class DinoVitExtractor:
     BLOCK_KEY = "block"
     QKV_KEY = "qkv"
+    CHECKPOINT_FILENAMES = {
+        "dino_vits16": "dino_deitsmall16_pretrain.pth",
+        "dino_vits8": "dino_deitsmall8_pretrain.pth",
+        "dino_vitb16": "dino_vitbase16_pretrain.pth",
+        "dino_vitb8": "dino_vitbase8_pretrain.pth",
+        "dino_resnet50": "dino_resnet50_pretrain.pth",
+    }
 
-    def __init__(self, model_name: str, device: str) -> None:
-        try:
-            self.model = torch.hub.load("facebookresearch/dino:main", model_name, trust_repo=True).to(device)
-        except TypeError:
-            self.model = torch.hub.load("facebookresearch/dino:main", model_name).to(device)
+    def __init__(
+        self,
+        model_name: str,
+        device: str,
+        *,
+        repo_or_dir: str | Path | None = None,
+        cache_dir: str | Path | None = None,
+        weights_path: str | Path | None = None,
+        local_files_only: bool = True,
+    ) -> None:
+        self.repo_or_dir = self._resolve_local_repo(repo_or_dir, cache_dir)
+        self.cache_dir = Path(cache_dir).expanduser().resolve() if cache_dir is not None else None
+        self.weights_path = self._resolve_checkpoint(model_name, self.cache_dir, weights_path)
+        if self.cache_dir is not None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            torch.hub.set_dir(str(self.cache_dir))
+
+        if self.repo_or_dir is not None:
+            if self.weights_path is not None:
+                self.model = torch.hub.load(str(self.repo_or_dir), model_name, pretrained=False, source="local")
+                self.model.load_state_dict(self._load_state_dict(self.weights_path), strict=True)
+            elif local_files_only:
+                raise FileNotFoundError(
+                    f"DINO checkpoint not found for {model_name}. "
+                    "Set metrics.dino_weights_path or place the expected checkpoint under "
+                    f"{self.cache_dir / 'checkpoints' if self.cache_dir is not None else '<dino_cache_dir>/checkpoints'}. "
+                    "To allow downloading the checkpoint, set metrics.dino_local_files_only=false."
+                )
+            else:
+                self.model = torch.hub.load(str(self.repo_or_dir), model_name, source="local")
+            self.model = self.model.to(device)
+        else:
+            if local_files_only:
+                raise FileNotFoundError(
+                    "DINO structure distance requires a local DINO torch.hub repo. "
+                    "Set metrics.dino_repo_or_dir to a directory containing hubconf.py, "
+                    "or set metrics.dino_cache_dir to a torch hub cache containing facebookresearch_dino*. "
+                    "To allow torch.hub to download facebookresearch/dino, set metrics.dino_local_files_only=false."
+                )
+            try:
+                self.model = torch.hub.load("facebookresearch/dino:main", model_name, trust_repo=True).to(device)
+            except TypeError:
+                self.model = torch.hub.load("facebookresearch/dino:main", model_name).to(device)
         self.model.eval()
         self.model_name = model_name
         self.device = device
         self.hook_handlers: list[Any] = []
         self.outputs_dict: dict[str, list[torch.Tensor]] = {}
         self._init_hooks_data()
+
+    @staticmethod
+    def _has_hubconf(path: Path) -> bool:
+        return path.is_dir() and (path / "hubconf.py").exists()
+
+    @classmethod
+    def _resolve_local_repo(cls, repo_or_dir: str | Path | None, cache_dir: str | Path | None) -> Path | None:
+        candidates: list[Path] = []
+        if repo_or_dir is not None:
+            candidates.append(Path(repo_or_dir).expanduser())
+        if cache_dir is not None:
+            cache_root = Path(cache_dir).expanduser()
+            candidates.extend(
+                sorted(
+                    path
+                    for path in cache_root.glob("*dino*")
+                    if path.is_dir()
+                )
+            )
+            candidates.extend(
+                sorted(
+                    path.parent
+                    for path in cache_root.rglob("hubconf.py")
+                    if "dino" in str(path.parent).lower()
+                )
+            )
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if cls._has_hubconf(resolved):
+                return resolved
+        return None
+
+    @classmethod
+    def _resolve_checkpoint(
+        cls,
+        model_name: str,
+        cache_dir: Path | None,
+        weights_path: str | Path | None,
+    ) -> Path | None:
+        candidates: list[Path] = []
+        if weights_path is not None:
+            candidates.append(Path(weights_path).expanduser())
+        filename = cls.CHECKPOINT_FILENAMES.get(model_name)
+        if cache_dir is not None and filename is not None:
+            candidates.append(cache_dir / "checkpoints" / filename)
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if resolved.exists():
+                return resolved
+        return None
+
+    @staticmethod
+    def _load_state_dict(path: Path) -> dict:
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+        except TypeError:
+            payload = torch.load(path, map_location="cpu")
+        if isinstance(payload, dict) and "state_dict" in payload and isinstance(payload["state_dict"], dict):
+            payload = payload["state_dict"]
+        return payload
 
     def _init_hooks_data(self) -> None:
         self.outputs_dict = {
@@ -105,10 +210,27 @@ class DinoVitExtractor:
 
 
 class DinoStructureDistanceCalculator(torch.nn.Module):
-    def __init__(self, model_name: str, patch_size: int, device: str) -> None:
+    def __init__(
+        self,
+        model_name: str,
+        patch_size: int,
+        device: str,
+        *,
+        repo_or_dir: str | Path | None = None,
+        cache_dir: str | Path | None = None,
+        weights_path: str | Path | None = None,
+        local_files_only: bool = True,
+    ) -> None:
         super().__init__()
         self.device = device
-        self.extractor = DinoVitExtractor(model_name=model_name, device=device)
+        self.extractor = DinoVitExtractor(
+            model_name=model_name,
+            device=device,
+            repo_or_dir=repo_or_dir,
+            cache_dir=cache_dir,
+            weights_path=weights_path,
+            local_files_only=local_files_only,
+        )
         imagenet_norm = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         self.global_transform = transforms.Compose(
             [
@@ -141,6 +263,10 @@ class MetricsCalculator:
         clip_local_files_only: bool = True,
         dino_model_name: str = "dino_vits8",
         dino_global_patch_size: int = 224,
+        dino_repo_or_dir: str | Path | None = None,
+        dino_cache_dir: str | Path | None = None,
+        dino_weights_path: str | Path | None = None,
+        dino_local_files_only: bool = True,
     ):
         self.device = device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu"
         self.clip_model_id = clip_model_id
@@ -148,6 +274,10 @@ class MetricsCalculator:
         self.clip_local_files_only = clip_local_files_only
         self.dino_model_name = dino_model_name
         self.dino_global_patch_size = dino_global_patch_size
+        self.dino_repo_or_dir = dino_repo_or_dir
+        self.dino_cache_dir = dino_cache_dir
+        self.dino_weights_path = dino_weights_path
+        self.dino_local_files_only = dino_local_files_only
         self._lpips_model = None
         self._lpips_spatial_model = None
         self._clip_model = None
@@ -188,11 +318,18 @@ class MetricsCalculator:
     def _lazy_structure_distance(self):
         if self._structure_distance_model is not None:
             return self._structure_distance_model
-        os.environ.setdefault("TORCH_HOME", str(Path(__file__).resolve().parents[2] / ".cache" / "torch"))
+        if self.dino_cache_dir is not None:
+            os.environ.setdefault("TORCH_HOME", str(Path(self.dino_cache_dir).expanduser().resolve()))
+        else:
+            os.environ.setdefault("TORCH_HOME", str(Path(__file__).resolve().parents[2] / ".cache" / "torch"))
         self._structure_distance_model = DinoStructureDistanceCalculator(
             model_name=self.dino_model_name,
             patch_size=self.dino_global_patch_size,
             device=self.device,
+            repo_or_dir=self.dino_repo_or_dir,
+            cache_dir=self.dino_cache_dir,
+            weights_path=self.dino_weights_path,
+            local_files_only=self.dino_local_files_only,
         ).eval()
         return self._structure_distance_model
 
@@ -312,8 +449,8 @@ class MetricsCalculator:
         mask_pred: np.ndarray | None = None,
     ) -> float:
         model = self._lazy_structure_distance()
-        ref = self._apply_mask(reference, mask_ref)
-        pred = self._apply_mask(prediction, mask_pred)
+        ref = self._apply_mask(reference, mask_ref) / 255.0
+        pred = self._apply_mask(prediction, mask_pred) / 255.0
         ref_tensor = torch.from_numpy(np.transpose(ref, axes=(2, 0, 1))).unsqueeze(0).to(self.device)
         pred_tensor = torch.from_numpy(np.transpose(pred, axes=(2, 0, 1))).unsqueeze(0).to(self.device)
         with torch.no_grad():

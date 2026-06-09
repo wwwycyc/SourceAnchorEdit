@@ -1,0 +1,26 @@
+{
+  "samples": [
+    {
+      "sample_id": "batch_case_0001",
+      "source_image_path": "single_case/source.png",
+      "source_prompt": "a long-haired tabby cat sitting on a wooden chair indoors",
+      "target_prompt": "a long-haired dog sitting on a wooden chair indoors",
+      "metadata": {
+        "dataset": "custom",
+        "record_id": "batch_case_0001",
+        "edit_instruction": "change the cat to a dog, keep everything else unchanged"
+      }
+    },
+    {
+      "sample_id": "batch_case_0002",
+      "source_image_path": "single_case/source.png",
+      "source_prompt": "a long-haired tabby cat sitting on a wooden chair indoors",
+      "target_prompt": "a long-haired dog sitting on a wooden chair indoors",
+      "metadata": {
+        "dataset": "custom",
+        "record_id": "batch_case_0002",
+        "edit_instruction": "change the cat to a dog, keep everything else unchanged"
+      }
+    }
+  ]
+}

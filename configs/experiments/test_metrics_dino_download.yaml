@@ -1,6 +1,6 @@
 experiment:
   input_manifest: ../../examples/single_case/sample.json
-  output_root: ../../runs/source_anchor_demo
+  output_root: ../../runs/source_anchor_dino_metrics_download
 
 method:
   config: ../methods/source_anchor.example.yaml
@@ -35,14 +35,14 @@ runtime:
   enable_xformers: false
 
 metrics:
-  enable_metrics: true  # Enable metrics computation
-  enable_lpips: true
-  enable_psnr: true
-  enable_mse: true
-  enable_ssim: true
-  enable_clip_score: true
-  enable_structure_distance: false
-  enable_locality_ratio: true
+  enable_metrics: true
+  enable_lpips: false
+  enable_psnr: false
+  enable_mse: false
+  enable_ssim: false
+  enable_clip_score: false
+  enable_structure_distance: true
+  enable_locality_ratio: false
   lpips_net: squeeze
   clip_model_id: openai/clip-vit-large-patch14
   clip_local_files_only: true
@@ -51,7 +51,7 @@ metrics:
   dino_repo_or_dir: null
   dino_cache_dir: ../../.cache/torch/hub
   dino_weights_path: null
-  dino_local_files_only: true
+  dino_local_files_only: false
 
 save:
   roi_cache: false

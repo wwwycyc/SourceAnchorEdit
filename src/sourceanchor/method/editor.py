@@ -52,6 +52,24 @@ class EditArtifacts:
     debug_json_path: Path
 
 
+@dataclass
+class PreparedSample:
+    sample: StandardSample
+    sample_output_dir: Path
+    source_image: np.ndarray
+    inversion: InversionOutput
+    inversion_cache_path: Path | None
+    source_reconstruction_path: Path
+    soft_roi: torch.Tensor
+    hard_roi: torch.Tensor
+    roi_metadata: dict
+    metric_mask: np.ndarray | None
+    metric_mask_source: str
+    target_reference: np.ndarray | None
+    roi_soft_path: Path
+    roi_hard_path: Path
+
+
 def build_run_manifest_payload(config: ExperimentConfig, artifacts: list[EditArtifacts]) -> dict:
     return {
         "method": config.method.name,
@@ -106,6 +124,10 @@ class SourceAnchorEditor:
                 clip_local_files_only=config.metrics.clip_local_files_only,
                 dino_model_name=config.metrics.dino_model_name,
                 dino_global_patch_size=config.metrics.dino_global_patch_size,
+                dino_repo_or_dir=config.metrics.dino_repo_or_dir,
+                dino_cache_dir=config.metrics.dino_cache_dir,
+                dino_weights_path=config.metrics.dino_weights_path,
+                dino_local_files_only=config.metrics.dino_local_files_only,
             )
 
     def _restore_default_attention_processors(self) -> None:
@@ -143,13 +165,16 @@ class SourceAnchorEditor:
             self.pipe.scheduler.set_timesteps(self.config.method.num_edit_steps)
 
     @torch.no_grad()
-    def _decode_latents(self, latents: torch.Tensor) -> np.ndarray:
+    def _decode_latent_batch(self, latents: torch.Tensor) -> np.ndarray:
         scaled = latents / 0.18215
         image = self.pipe.vae.decode(scaled).sample
         image = (image / 2 + 0.5).clamp(0, 1)
         image = image.cpu().permute(0, 2, 3, 1).numpy()
-        image = np.clip(image * 255.0, 0, 255).astype(np.uint8)
-        return image[0]
+        return np.clip(image * 255.0, 0, 255).astype(np.uint8)
+
+    @torch.no_grad()
+    def _decode_latents(self, latents: torch.Tensor) -> np.ndarray:
+        return self._decode_latent_batch(latents)[0]
 
     def _load_roi(self, sample: StandardSample) -> tuple[torch.Tensor, torch.Tensor, dict]:
         if self.config.roi.source == "cache":
@@ -233,7 +258,7 @@ class SourceAnchorEditor:
 
         return inversion, cache_dir
 
-    def run_sample(self, sample: StandardSample, run_dir: Path) -> EditArtifacts:
+    def _prepare_sample(self, sample: StandardSample, run_dir: Path) -> PreparedSample:
         sample_output_dir = sample_dir(run_dir, sample.sample_id)
         write_json(sample_output_dir / "sample.json", sample.to_dict())
         source_image = load_rgb_image(sample.source_image_path)
@@ -245,23 +270,76 @@ class SourceAnchorEditor:
         metric_mask, metric_mask_source = self._load_optional_mask(sample, hard_roi)
         target_reference = self._load_optional_target_reference(sample)
         roi_soft_path, roi_hard_path = self._save_roi_visuals(sample_output_dir, soft_roi, hard_roi)
-
-        target_condition = self.prompt_encoder.encode(sample.target_prompt)
-        source_condition = self.prompt_encoder.encode(sample.source_prompt)
-        focus_mask = build_full_target_token_mask(target_condition).to(self.pipe.device)
-
-        self._set_timesteps()
-        latents = inversion.zt_src.detach().clone().to(self.pipe.device, dtype=self.pipe.unet.dtype)
-        source_latents = self._resample_source_latents(
-            [latent.to(self.pipe.device, dtype=self.pipe.unet.dtype) for latent in inversion.src_latents],
-            len(self.pipe.scheduler.timesteps),
+        return PreparedSample(
+            sample=sample,
+            sample_output_dir=sample_output_dir,
+            source_image=source_image,
+            inversion=inversion,
+            inversion_cache_path=inversion_cache_path,
+            source_reconstruction_path=source_reconstruction_path,
+            soft_roi=soft_roi,
+            hard_roi=hard_roi,
+            roi_metadata=roi_metadata,
+            metric_mask=metric_mask,
+            metric_mask_source=metric_mask_source,
+            target_reference=target_reference,
+            roi_soft_path=roi_soft_path,
+            roi_hard_path=roi_hard_path,
         )
-        target_embeddings = target_condition.embeddings.to(self.pipe.device, dtype=self.pipe.unet.dtype)
-        source_embeddings = source_condition.embeddings.to(self.pipe.device, dtype=self.pipe.unet.dtype)
 
-        step_debug: list[dict[str, float]] = []
+    def _encode_prompt_batch(self, prompts: list[str]) -> tuple[torch.Tensor, torch.Tensor]:
+        conditions = [self.prompt_encoder.encode(prompt) for prompt in prompts]
+        embeddings = torch.cat([condition.embeddings for condition in conditions], dim=0)
+        token_mask = torch.cat([build_full_target_token_mask(condition) for condition in conditions], dim=0)
+        return (
+            embeddings.to(self.pipe.device, dtype=self.pipe.unet.dtype),
+            token_mask.to(self.pipe.device),
+        )
+
+    @staticmethod
+    def _can_batch_prepared(prepared: list[PreparedSample]) -> bool:
+        if len(prepared) <= 1:
+            return True
+        latent_shape = tuple(prepared[0].inversion.zt_src.shape)
+        soft_shape = tuple(prepared[0].soft_roi.shape)
+        hard_shape = tuple(prepared[0].hard_roi.shape)
+        return all(
+            tuple(item.inversion.zt_src.shape) == latent_shape
+            and tuple(item.soft_roi.shape) == soft_shape
+            and tuple(item.hard_roi.shape) == hard_shape
+            for item in prepared
+        )
+
+    def _run_prepared_batch(self, prepared: list[PreparedSample]) -> list[EditArtifacts]:
+        if not prepared:
+            return []
+        if not self._can_batch_prepared(prepared):
+            artifacts: list[EditArtifacts] = []
+            for item in prepared:
+                artifacts.extend(self._run_prepared_batch([item]))
+            return artifacts
+
+        batch_count = len(prepared)
+        self._set_timesteps()
+        latents = torch.cat(
+            [item.inversion.zt_src.detach().clone().to(self.pipe.device, dtype=self.pipe.unet.dtype) for item in prepared],
+            dim=0,
+        )
+        source_latents_by_sample = [
+            self._resample_source_latents(
+                [latent.to(self.pipe.device, dtype=self.pipe.unet.dtype) for latent in item.inversion.src_latents],
+                len(self.pipe.scheduler.timesteps),
+            )
+            for item in prepared
+        ]
+        source_embeddings, _source_mask = self._encode_prompt_batch([item.sample.source_prompt for item in prepared])
+        target_embeddings, focus_mask = self._encode_prompt_batch([item.sample.target_prompt for item in prepared])
+        soft_roi = torch.cat([item.soft_roi.to(self.pipe.device, dtype=self.pipe.unet.dtype) for item in prepared], dim=0)
+        hard_roi = torch.cat([item.hard_roi.to(self.pipe.device, dtype=self.pipe.unet.dtype) for item in prepared], dim=0)
+
+        step_debug: list[list[dict[str, float]]] = [[] for _ in prepared]
         for step_idx, timestep in enumerate(self.pipe.scheduler.timesteps):
-            source_latent = source_latents[step_idx]
+            source_latent = torch.cat([source_latents[step_idx] for source_latents in source_latents_by_sample], dim=0)
             self.attention_store.reset()
             eps_src = self.source_predictor.predict(latents, timestep, source_embeddings)
             self.attention_store.reset()
@@ -293,7 +371,7 @@ class SourceAnchorEditor:
             )
             eps = eps_src + effective_mask * (eps_tar - eps_src)
             prev_latents = self.pipe.scheduler.step(eps, timestep, latents).prev_sample
-            next_source_idx = min(step_idx + 1, len(source_latents) - 1)
+            next_source_idx = min(step_idx + 1, len(self.pipe.scheduler.timesteps) - 1)
             anchor_mask = build_anchor_mask(
                 hard_roi,
                 soft_roi,
@@ -301,85 +379,107 @@ class SourceAnchorEditor:
                 step_idx,
                 len(self.pipe.scheduler.timesteps),
             )
-            latents = anchor_mask * prev_latents + (1.0 - anchor_mask) * source_latents[next_source_idx]
-            step_debug.append(
-                {
-                    "step_idx": float(step_idx),
-                    "timestep": float(timestep.item()) if hasattr(timestep, "item") else float(timestep),
-                    "delta": float(target_stats["delta"]),
-                    "dynamic_mask_mean": float(dynamic_mask.mean().item()),
-                    "effective_mask_mean": float(effective_mask.mean().item()),
-                    "soft_roi_mean": float(soft_roi.mean().item()),
-                    "hard_roi_mean": float(hard_roi.mean().item()),
-                }
+            next_source_latents = torch.cat(
+                [source_latents[next_source_idx] for source_latents in source_latents_by_sample],
+                dim=0,
             )
+            latents = anchor_mask * prev_latents + (1.0 - anchor_mask) * next_source_latents
 
-        edited_image = self._decode_latents(latents)
-        edited_image_path = save_image(sample_output_dir / "edited.png", edited_image)
-
-        # Compute metrics if enabled
-        metrics_result = {}
-        if self.metrics_calculator is not None:
-            try:
-                metrics_result = self.metrics_calculator.compute_all_metrics(
-                    source_image=source_image,
-                    edited_image=edited_image,
-                    target_prompt=sample.target_prompt if self.config.metrics.enable_clip_score else None,
-                    source_reconstruction=inversion.reconstruction_image,
-                    source_prompt=sample.source_prompt if self.config.metrics.enable_clip_score else None,
-                    target_reference=target_reference,
-                    edit_mask=metric_mask,
-                    enable_lpips=self.config.metrics.enable_lpips,
-                    enable_psnr=self.config.metrics.enable_psnr,
-                    enable_mse=self.config.metrics.enable_mse,
-                    enable_ssim=self.config.metrics.enable_ssim,
-                    enable_clip_score=self.config.metrics.enable_clip_score,
-                    enable_structure_distance=self.config.metrics.enable_structure_distance,
-                    enable_locality_ratio=self.config.metrics.enable_locality_ratio,
+            delta_per_sample = target_stats.get("delta_per_sample", [target_stats["delta"]] * batch_count)
+            for batch_index in range(batch_count):
+                step_debug[batch_index].append(
+                    {
+                        "step_idx": float(step_idx),
+                        "timestep": float(timestep.item()) if hasattr(timestep, "item") else float(timestep),
+                        "delta": float(delta_per_sample[batch_index]),
+                        "dynamic_mask_mean": float(dynamic_mask[batch_index].mean().item()),
+                        "effective_mask_mean": float(effective_mask[batch_index].mean().item()),
+                        "soft_roi_mean": float(soft_roi[batch_index].mean().item()),
+                        "hard_roi_mean": float(hard_roi[batch_index].mean().item()),
+                    }
                 )
-            except Exception as e:
-                metrics_result = {"error": str(e)}
 
-        overview_path: Path | None = None
-        if should_save_overview(self.config.save):
-            overview = compose_simple_overview(
-                [
-                    ("source", source_image),
-                    ("reconstruction", inversion.reconstruction_image),
-                    ("edited", edited_image),
-                ],
-                columns=3,
+        edited_images = self._decode_latent_batch(latents)
+        artifacts: list[EditArtifacts] = []
+        for batch_index, item in enumerate(prepared):
+            sample = item.sample
+            edited_image = edited_images[batch_index]
+            edited_image_path = save_image(item.sample_output_dir / "edited.png", edited_image)
+
+            metrics_result = {}
+            if self.metrics_calculator is not None:
+                try:
+                    metrics_result = self.metrics_calculator.compute_all_metrics(
+                        source_image=item.source_image,
+                        edited_image=edited_image,
+                        target_prompt=sample.target_prompt if self.config.metrics.enable_clip_score else None,
+                        source_reconstruction=item.inversion.reconstruction_image,
+                        source_prompt=sample.source_prompt if self.config.metrics.enable_clip_score else None,
+                        target_reference=item.target_reference,
+                        edit_mask=item.metric_mask,
+                        enable_lpips=self.config.metrics.enable_lpips,
+                        enable_psnr=self.config.metrics.enable_psnr,
+                        enable_mse=self.config.metrics.enable_mse,
+                        enable_ssim=self.config.metrics.enable_ssim,
+                        enable_clip_score=self.config.metrics.enable_clip_score,
+                        enable_structure_distance=self.config.metrics.enable_structure_distance,
+                        enable_locality_ratio=self.config.metrics.enable_locality_ratio,
+                    )
+                except Exception as e:
+                    metrics_result = {"error": str(e)}
+
+            overview_path: Path | None = None
+            if should_save_overview(self.config.save):
+                overview = compose_simple_overview(
+                    [
+                        ("source", item.source_image),
+                        ("reconstruction", item.inversion.reconstruction_image),
+                        ("edited", edited_image),
+                    ],
+                    columns=3,
+                )
+                overview_path = save_image(item.sample_output_dir / "overview.png", overview)
+
+            debug_json_path = write_json(
+                item.sample_output_dir / "debug.json",
+                {
+                    "sample_id": sample.sample_id,
+                    "source_prompt": sample.source_prompt,
+                    "target_prompt": sample.target_prompt,
+                    "roi_source": self.config.roi.source,
+                    "inversion_source": self.config.inversion.source,
+                    "inversion_cache_dir": str(item.inversion_cache_path) if item.inversion_cache_path is not None else None,
+                    "roi_metadata": item.roi_metadata,
+                    "metric_mask_source": item.metric_mask_source,
+                    "inversion": item.inversion.metadata,
+                    "batch_size": batch_count,
+                    "batch_index": batch_index,
+                    "steps": step_debug[batch_index],
+                    "metrics": metrics_result,
+                },
             )
-            overview_path = save_image(sample_output_dir / "overview.png", overview)
-
-        debug_json_path = write_json(
-            sample_output_dir / "debug.json",
-            {
-                "sample_id": sample.sample_id,
-                "source_prompt": sample.source_prompt,
-                "target_prompt": sample.target_prompt,
-                "roi_source": self.config.roi.source,
-                "inversion_source": self.config.inversion.source,
-                "inversion_cache_dir": str(inversion_cache_path) if inversion_cache_path is not None else None,
-                "roi_metadata": roi_metadata,
-                "metric_mask_source": metric_mask_source,
-                "inversion": inversion.metadata,
-                "steps": step_debug,
-                "metrics": metrics_result,  # Add metrics to debug output
-            },
-        )
+            artifacts.append(
+                EditArtifacts(
+                    sample_id=sample.sample_id,
+                    sample_output_dir=item.sample_output_dir,
+                    edited_image_path=edited_image_path,
+                    source_reconstruction_path=item.source_reconstruction_path,
+                    inversion_cache_dir=item.inversion_cache_path,
+                    overview_path=overview_path,
+                    roi_soft_path=item.roi_soft_path,
+                    roi_hard_path=item.roi_hard_path,
+                    debug_json_path=debug_json_path,
+                )
+            )
         clear_cuda_memory()
-        return EditArtifacts(
-            sample_id=sample.sample_id,
-            sample_output_dir=sample_output_dir,
-            edited_image_path=edited_image_path,
-            source_reconstruction_path=source_reconstruction_path,
-            inversion_cache_dir=inversion_cache_path,
-            overview_path=overview_path,
-            roi_soft_path=roi_soft_path,
-            roi_hard_path=roi_hard_path,
-            debug_json_path=debug_json_path,
-        )
+        return artifacts
+
+    def run_samples(self, samples: list[StandardSample], run_dir: Path) -> list[EditArtifacts]:
+        prepared = [self._prepare_sample(sample, run_dir) for sample in samples]
+        return self._run_prepared_batch(prepared)
+
+    def run_sample(self, sample: StandardSample, run_dir: Path) -> EditArtifacts:
+        return self.run_samples([sample], run_dir)[0]
 
 
 def run_experiment(config: ExperimentConfig, samples: list[StandardSample]) -> Path:
@@ -387,7 +487,8 @@ def run_experiment(config: ExperimentConfig, samples: list[StandardSample]) -> P
     write_json(run_dir / "experiment_config.json", config.to_serializable_dict())
     editor = SourceAnchorEditor(config)
     artifacts = []
-    for sample in samples:
-        artifacts.append(editor.run_sample(sample, run_dir))
+    batch_size = max(1, int(config.runtime.batch_size))
+    for start in range(0, len(samples), batch_size):
+        artifacts.extend(editor.run_samples(samples[start : start + batch_size], run_dir))
     write_json(run_dir / "run_manifest.json", build_run_manifest_payload(config, artifacts))
     return run_dir
