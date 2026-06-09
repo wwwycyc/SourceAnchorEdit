@@ -235,11 +235,6 @@ def get_source_anchor_clip_model_id() -> str:
     return str(load_web_demo_config().get("web_demo", {}).get("source_anchor", {}).get("clip_model") or "").strip()
 
 
-def get_source_anchor_ntip2p_root() -> str:
-    value = str(load_web_demo_config().get("web_demo", {}).get("source_anchor", {}).get("ntip2p_root") or "").strip()
-    return value
-
-
 def normalize_shared_steps(value: object) -> int:
     try:
         steps = int(value)
@@ -662,7 +657,6 @@ class SourceAnchorWebDemoHandler(SimpleHTTPRequestHandler):
                 "output_root": str(self.output_root.resolve()),
                 "model_id": get_source_anchor_model_id(),
                 "clip_model_id": get_source_anchor_clip_model_id(),
-                "ntip2p_root": get_source_anchor_ntip2p_root(),
                 "num_inversion_steps": num_steps,
                 "num_edit_steps": num_steps,
                 "method": "source_anchor",
@@ -766,7 +760,6 @@ class SourceAnchorWebDemoHandler(SimpleHTTPRequestHandler):
             "models": {
                 "sd_model": get_source_anchor_model_id(),
                 "clip_model": get_source_anchor_clip_model_id(),
-                "ntip2p_root": get_source_anchor_ntip2p_root(),
                 "dino_weights": None,
             },
             "roi": {
@@ -808,7 +801,6 @@ class SourceAnchorWebDemoHandler(SimpleHTTPRequestHandler):
             models=ModelConfig(
                 sd_model=experiment_config_payload["models"]["sd_model"],
                 clip_model=experiment_config_payload["models"]["clip_model"],
-                ntip2p_root=Path(experiment_config_payload["models"]["ntip2p_root"]).resolve(),
                 dino_weights=experiment_config_payload["models"]["dino_weights"],
             ),
             runtime=RuntimeConfig(**experiment_config_payload["runtime"]),

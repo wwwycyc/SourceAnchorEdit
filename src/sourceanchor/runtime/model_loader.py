@@ -19,11 +19,7 @@ def resolve_model_source(value: str | Path | None) -> str:
 
 
 class NativeInversionModule:
-    """Native implementation module providing NTIP2P-compatible interface.
-
-    This module replaces the external NTIP2P dependency with native implementations
-    using diffusers APIs.
-    """
+    """Native inversion and attention module used by the standalone release."""
 
     def __init__(self):
         # Module-level state (configured externally)
@@ -50,7 +46,7 @@ def create_native_inversion_module() -> NativeInversionModule:
     """Factory function to create native inversion module.
 
     Returns:
-        NativeInversionModule instance with NTIP2P-compatible interface
+        NativeInversionModule instance with inversion and attention utilities.
     """
     return NativeInversionModule()
 

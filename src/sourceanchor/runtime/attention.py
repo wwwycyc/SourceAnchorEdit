@@ -1,7 +1,4 @@
-"""Native attention capture and control implementation.
-
-Replaces external NTIP2P dependency with diffusers-native attention hooking.
-"""
+"""Native attention capture and control implementation."""
 
 from __future__ import annotations
 

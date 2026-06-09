@@ -18,6 +18,7 @@ from sourceanchor.method.prompt_handling import (
 )
 from sourceanchor.method.source_anchor import build_anchor_mask, build_effective_mask
 from sourceanchor.metrics import MetricsCalculator
+from sourceanchor.metrics_summary import write_metrics_summary
 from sourceanchor.outputs import (
     inversion_cache_dir,
     make_run_dir,
@@ -70,13 +71,21 @@ class PreparedSample:
     roi_hard_path: Path
 
 
-def build_run_manifest_payload(config: ExperimentConfig, artifacts: list[EditArtifacts]) -> dict:
+def build_run_manifest_payload(
+    config: ExperimentConfig,
+    artifacts: list[EditArtifacts],
+    *,
+    metrics_summary_path: Path | None = None,
+    metrics_summary_csv_path: Path | None = None,
+) -> dict:
     return {
         "method": config.method.name,
         "roi_source": config.roi.source,
         "roi_cache_root": str(config.roi.cache_root) if config.roi.cache_root is not None else None,
         "inversion_source": config.inversion.source,
         "inversion_cache_root": str(config.inversion.cache_root) if config.inversion.cache_root is not None else None,
+        "metrics_summary_path": str(metrics_summary_path) if metrics_summary_path is not None else None,
+        "metrics_summary_csv_path": str(metrics_summary_csv_path) if metrics_summary_csv_path is not None else None,
         "sample_count": len(artifacts),
         "samples": [
             {
@@ -109,9 +118,9 @@ class SourceAnchorEditor:
         self.target_predictor = TargetPromptPredictor(self.pipe, self.prompt_encoder, config.method.guidance_scale)
         self.inversion_backend = DDIMInversionBackend(self.pipe, config.models, config.method)
         self.dynamic_mask_builder = DynamicMaskBuilder(config.method)
-        self.ntip2p = create_native_inversion_module()
-        configure_inversion_module(self.ntip2p, self.pipe, config.method)
-        self.attention_store = self.ntip2p.AttentionStore()
+        self.inversion_module = create_native_inversion_module()
+        configure_inversion_module(self.inversion_module, self.pipe, config.method)
+        self.attention_store = self.inversion_module.AttentionStore()
         self._register_attention_store()
 
         # Initialize metrics calculator if enabled
@@ -134,7 +143,7 @@ class SourceAnchorEditor:
         self.pipe.unet.set_attn_processor(dict(self._default_attn_processors))
 
     def _register_attention_store(self) -> None:
-        self.ntip2p.ptp_utils.register_attention_control(self.pipe, self.attention_store)
+        self.inversion_module.ptp_utils.register_attention_control(self.pipe, self.attention_store)
 
     @staticmethod
     def _resample_source_latents(source_latents: list[torch.Tensor], target_count: int) -> list[torch.Tensor]:
@@ -490,5 +499,17 @@ def run_experiment(config: ExperimentConfig, samples: list[StandardSample]) -> P
     batch_size = max(1, int(config.runtime.batch_size))
     for start in range(0, len(samples), batch_size):
         artifacts.extend(editor.run_samples(samples[start : start + batch_size], run_dir))
-    write_json(run_dir / "run_manifest.json", build_run_manifest_payload(config, artifacts))
+    metrics_summary_path, metrics_summary_csv_path = write_metrics_summary(
+        run_dir,
+        [item.debug_json_path for item in artifacts],
+    )
+    write_json(
+        run_dir / "run_manifest.json",
+        build_run_manifest_payload(
+            config,
+            artifacts,
+            metrics_summary_path=metrics_summary_path,
+            metrics_summary_csv_path=metrics_summary_csv_path,
+        ),
+    )
     return run_dir

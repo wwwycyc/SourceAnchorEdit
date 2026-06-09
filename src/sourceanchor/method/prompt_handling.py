@@ -94,7 +94,12 @@ def build_full_target_token_mask(target_condition: TextCondition) -> torch.Tenso
     return target_condition.token_mask
 
 
-def aggregate_step_cross_attention(attention_store, token_mask: torch.Tensor, target_hw: tuple[int, int], locations: tuple[str, ...]) -> torch.Tensor:
+def aggregate_step_cross_attention(
+    attention_store,
+    token_mask: torch.Tensor,
+    target_hw: tuple[int, int],
+    locations: tuple[str, ...],
+) -> torch.Tensor:
     averaged = attention_store.get_average_attention()
     maps: list[torch.Tensor] = []
     device = token_mask.device

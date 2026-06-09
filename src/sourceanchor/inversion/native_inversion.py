@@ -1,7 +1,4 @@
-"""Native DDIM inversion implementation using diffusers APIs.
-
-Replaces external NTIP2P dependency with native PyTorch and diffusers code.
-"""
+"""Native DDIM inversion implementation using diffusers APIs."""
 
 from __future__ import annotations
 
@@ -155,34 +152,23 @@ class NativeInversion:
 
         return noise_pred
 
-    def _ddim_step_forward(self, latents: torch.Tensor, noise_pred: torch.Tensor, t: int, t_next: int) -> torch.Tensor:
-        """Perform one DDIM forward step (image -> noise).
-
-        Args:
-            latents: Current latent z_t
-            noise_pred: Predicted noise
-            t: Current timestep
-            t_next: Next timestep (should be > t for forward)
-
-        Returns:
-            Next latent z_{t+1}
-        """
-        # Get alpha values from scheduler
-        alpha_prod_t = self.pipe.scheduler.alphas_cumprod[t]
-        alpha_prod_t_next = self.pipe.scheduler.alphas_cumprod[t_next] if t_next < len(self.pipe.scheduler.alphas_cumprod) else self.pipe.scheduler.final_alpha_cumprod
-
+    def next_step(self, model_output: torch.Tensor, timestep: int | torch.Tensor, sample: torch.Tensor) -> torch.Tensor:
+        """Perform one DDIM inversion step with fixed scheduler stride."""
+        if hasattr(timestep, "item"):
+            timestep = int(timestep.item())
+        step_stride = self.pipe.scheduler.config.num_train_timesteps // self.pipe.scheduler.num_inference_steps
+        timestep, next_timestep = min(timestep - step_stride, 999), timestep
+        alpha_prod_t = (
+            self.pipe.scheduler.alphas_cumprod[timestep]
+            if timestep >= 0
+            else self.pipe.scheduler.final_alpha_cumprod
+        )
+        alpha_prod_t_next = self.pipe.scheduler.alphas_cumprod[next_timestep]
         beta_prod_t = 1 - alpha_prod_t
-
-        # Predict x_0 (denoised latent)
-        pred_original_sample = (latents - beta_prod_t ** 0.5 * noise_pred) / alpha_prod_t ** 0.5
-
-        # Compute direction pointing to x_t
-        pred_sample_direction = (1 - alpha_prod_t_next) ** 0.5 * noise_pred
-
-        # Compute x_{t+1}
-        next_latents = alpha_prod_t_next ** 0.5 * pred_original_sample + pred_sample_direction
-
-        return next_latents
+        next_original_sample = (sample - beta_prod_t ** 0.5 * model_output) / alpha_prod_t ** 0.5
+        next_sample_direction = (1 - alpha_prod_t_next) ** 0.5 * model_output
+        next_sample = alpha_prod_t_next ** 0.5 * next_original_sample + next_sample_direction
+        return next_sample
 
     @torch.no_grad()
     def ddim_inversion(self, image: np.ndarray | Image.Image) -> tuple[np.ndarray, list[torch.Tensor]]:
@@ -211,32 +197,20 @@ class NativeInversion:
         timesteps = reversed(timesteps)
         timesteps = list(timesteps)
 
-        # Store all intermediate latents
         ddim_latents = [latents.clone()]
+        latents = latents.clone().detach()
 
-        # Perform inversion steps
-        for i in range(len(timesteps) - 1):
+        for i in range(num_inference_steps):
             t = timesteps[i]
-            t_next = timesteps[i + 1]
-
-            # Ensure timesteps are tensors on correct device
             if not isinstance(t, torch.Tensor):
                 t = torch.tensor(t, device=self.device, dtype=torch.long)
-            if not isinstance(t_next, torch.Tensor):
-                t_next = torch.tensor(t_next, device=self.device, dtype=torch.long)
-
-            # Predict noise using conditional embeddings only (no CFG during inversion)
-            # Use only the conditional part of context
             _, cond_embeddings = self.context.chunk(2)
             noise_pred = self.pipe.unet(
                 latents,
                 t,
                 encoder_hidden_states=cond_embeddings,
             ).sample
-
-            # DDIM forward step
-            latents = self._ddim_step_forward(latents, noise_pred, t.item() if hasattr(t, 'item') else int(t), t_next.item() if hasattr(t_next, 'item') else int(t_next))
-
+            latents = self.next_step(noise_pred, t, latents)
             ddim_latents.append(latents.clone())
 
         return reconstruction_image, ddim_latents

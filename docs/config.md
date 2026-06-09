@@ -50,7 +50,6 @@ Notes:
 models:
   sd_model: runwayml/stable-diffusion-v1-5
   clip_model: openai/clip-vit-large-patch14
-  ntip2p_root: ../../NTIP2P
   dino_weights: null
 ```
 

@@ -53,7 +53,6 @@ class InversionConfig:
 class ModelConfig:
     sd_model: str | None = None
     clip_model: str | None = None
-    ntip2p_root: Path | None = None
     dino_weights: str | None = None
 
 
@@ -284,7 +283,6 @@ def load_model_config(mapping: dict[str, Any], *, base_dir: Path) -> ModelConfig
     return ModelConfig(
         sd_model=_resolve_model_like(sd_model),
         clip_model=_resolve_model_like(clip_model),
-        ntip2p_root=None,  # No longer used - kept for backward compatibility
         dino_weights=_resolve_model_like(dino_weights),
     )
 

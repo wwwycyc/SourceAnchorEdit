@@ -6,7 +6,6 @@ web_demo:
   source_anchor:
     sd_model: "runwayml/stable-diffusion-v1-5"
     clip_model: "openai/clip-vit-large-patch14"
-    ntip2p_root: "/abs/path/to/NTIP2P"
     num_steps: 5
     dtype: "float16"
     attention_slicing: true
