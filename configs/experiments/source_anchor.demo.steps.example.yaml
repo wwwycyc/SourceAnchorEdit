@@ -1,6 +1,6 @@
 experiment:
   input_manifest: ../../examples/single_case/sample.json
-  output_root: ../../runs/source_anchor_demo
+  output_root: ../../runs/source_anchor_demo_steps
 
 method:
   config: ../methods/source_anchor.example.yaml
@@ -35,7 +35,7 @@ runtime:
   enable_xformers: false
 
 metrics:
-  enable_metrics: false  # Set to true to compute metrics (requires CLIP model)
+  enable_metrics: false
   enable_lpips: true
   enable_psnr: true
   enable_mse: true
@@ -57,9 +57,9 @@ save:
   roi_cache: false
   inversion_tensors: false
   debug_json: true
-  step_visualizations: false
-  step_interval: 1
-  step_indices: []
+  step_visualizations: true
+  step_interval: 3
+  step_indices: [0]
   step_include_last: true
   step_save_trace: true
   step_save_diagnostics: true
@@ -69,6 +69,6 @@ save:
   step_save_attention: true
   step_save_discrepancy: true
   step_save_latent_drift: true
-  step_save_roi: false
+  step_save_roi: true
   step_save_latent_preview: false
   overview: true

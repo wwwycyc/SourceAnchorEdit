@@ -76,6 +76,19 @@ class SaveConfig:
     inversion_tensors: bool = False
     debug_json: bool = True
     step_visualizations: bool = False
+    step_interval: int = 1
+    step_indices: tuple[int, ...] = ()
+    step_include_last: bool = True
+    step_save_trace: bool = True
+    step_save_diagnostics: bool = True
+    step_save_dynamic_mask: bool = True
+    step_save_effective_mask: bool = True
+    step_save_anchor_mask: bool = True
+    step_save_attention: bool = True
+    step_save_discrepancy: bool = True
+    step_save_latent_drift: bool = True
+    step_save_roi: bool = False
+    step_save_latent_preview: bool = False
     overview: bool = True
 
 
@@ -306,13 +319,38 @@ def load_runtime_config(mapping: dict[str, Any]) -> RuntimeConfig:
 
 
 def load_save_config(mapping: dict[str, Any]) -> SaveConfig:
-    return SaveConfig(
+    step_indices_raw = mapping.get("step_indices", ())
+    if step_indices_raw is None:
+        step_indices = ()
+    elif isinstance(step_indices_raw, (list, tuple)):
+        step_indices = tuple(sorted({int(value) for value in step_indices_raw}))
+    else:
+        step_indices = (int(step_indices_raw),)
+    config = SaveConfig(
         roi_cache=bool(mapping.get("roi_cache", False)),
         inversion_tensors=bool(mapping.get("inversion_tensors", False)),
         debug_json=bool(mapping.get("debug_json", True)),
         step_visualizations=bool(mapping.get("step_visualizations", False)),
+        step_interval=int(mapping.get("step_interval", 1)),
+        step_indices=step_indices,
+        step_include_last=bool(mapping.get("step_include_last", True)),
+        step_save_trace=bool(mapping.get("step_save_trace", True)),
+        step_save_diagnostics=bool(mapping.get("step_save_diagnostics", True)),
+        step_save_dynamic_mask=bool(mapping.get("step_save_dynamic_mask", True)),
+        step_save_effective_mask=bool(mapping.get("step_save_effective_mask", True)),
+        step_save_anchor_mask=bool(mapping.get("step_save_anchor_mask", True)),
+        step_save_attention=bool(mapping.get("step_save_attention", True)),
+        step_save_discrepancy=bool(mapping.get("step_save_discrepancy", True)),
+        step_save_latent_drift=bool(mapping.get("step_save_latent_drift", True)),
+        step_save_roi=bool(mapping.get("step_save_roi", False)),
+        step_save_latent_preview=bool(mapping.get("step_save_latent_preview", False)),
         overview=bool(mapping.get("overview", True)),
     )
+    if config.step_interval <= 0:
+        raise ValueError("save.step_interval must be > 0")
+    if any(index < 0 for index in config.step_indices):
+        raise ValueError("save.step_indices must contain non-negative step indices")
+    return config
 
 
 def load_metrics_config(mapping: dict[str, Any], *, base_dir: Path) -> MetricsConfig:

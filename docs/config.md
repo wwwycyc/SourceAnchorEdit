@@ -108,6 +108,19 @@ save:
   inversion_tensors: false
   debug_json: true
   step_visualizations: false
+  step_interval: 1
+  step_indices: []
+  step_include_last: true
+  step_save_trace: true
+  step_save_diagnostics: true
+  step_save_dynamic_mask: true
+  step_save_effective_mask: true
+  step_save_anchor_mask: true
+  step_save_attention: true
+  step_save_discrepancy: true
+  step_save_latent_drift: true
+  step_save_roi: false
+  step_save_latent_preview: false
   overview: true
 ```
 
@@ -138,7 +151,32 @@ The `save` section controls only whether intermediate artifacts are written to d
 - `step_visualizations`
 - `overview`
 
-This keeps “method uses something internally” separate from “artifact is written out”.
+`step_visualizations` is the master switch for per-step artifacts. When enabled, each sample gets a
+`steps/` directory with:
+
+- `step_manifest.json`
+- `step_trace.csv` / `step_trace.json` when `step_save_trace: true`
+- `step_diagnostics.csv` / `step_diagnostics.json` when `step_save_diagnostics: true`
+- `step_000/*.png`, `step_001/*.png`, ... for selected intermediate maps
+
+Step selection is controlled by:
+
+- `step_interval`: record every N edit steps
+- `step_indices`: always record these zero-based edit step indices
+- `step_include_last`: always record the last edit step
+
+The per-map switches control which intermediate images are written:
+
+- `step_save_dynamic_mask`
+- `step_save_effective_mask`
+- `step_save_anchor_mask`
+- `step_save_attention`
+- `step_save_discrepancy`
+- `step_save_latent_drift`
+- `step_save_roi`
+- `step_save_latent_preview`
+
+This keeps "method uses something internally" separate from "artifact is written out".
 
 ## Dataset Scope
 

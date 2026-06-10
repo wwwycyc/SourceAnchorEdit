@@ -29,6 +29,7 @@ from sourceanchor.outputs import (
     should_save_roi_cache,
     write_json,
 )
+from sourceanchor.outputs.step_artifacts import StepArtifactWriter
 from sourceanchor.outputs.writer import compose_simple_overview, save_image
 from sourceanchor.roi.cache import load_cached_roi
 from sourceanchor.roi.live import generate_live_roi
@@ -51,6 +52,7 @@ class EditArtifacts:
     roi_soft_path: Path | None
     roi_hard_path: Path | None
     debug_json_path: Path
+    step_manifest_path: Path | None = None
 
 
 @dataclass
@@ -99,6 +101,7 @@ def build_run_manifest_payload(
                 "roi_soft_path": str(item.roi_soft_path) if item.roi_soft_path is not None else None,
                 "roi_hard_path": str(item.roi_hard_path) if item.roi_hard_path is not None else None,
                 "debug_json_path": str(item.debug_json_path),
+                "step_manifest_path": str(item.step_manifest_path) if item.step_manifest_path is not None else None,
             }
             for item in artifacts
         ],
@@ -347,6 +350,18 @@ class SourceAnchorEditor:
         hard_roi = torch.cat([item.hard_roi.to(self.pipe.device, dtype=self.pipe.unet.dtype) for item in prepared], dim=0)
 
         step_debug: list[list[dict[str, float]]] = [[] for _ in prepared]
+        total_steps = len(self.pipe.scheduler.timesteps)
+        step_writers: list[StepArtifactWriter | None] = [
+            StepArtifactWriter(
+                config=self.config.save,
+                sample_id=item.sample.sample_id,
+                sample_output_dir=item.sample_output_dir,
+                total_steps=total_steps,
+            )
+            if self.config.save.step_visualizations
+            else None
+            for item in prepared
+        ]
         for step_idx, timestep in enumerate(self.pipe.scheduler.timesteps):
             source_latent = torch.cat([source_latents[step_idx] for source_latents in source_latents_by_sample], dim=0)
             self.attention_store.reset()
@@ -370,15 +385,19 @@ class SourceAnchorEditor:
                 source_latent,
                 attention_map,
             )
+            discrepancy_gap = torch.abs(target_noise - eps_src).flatten(1).mean(dim=1)
+            src_tar_gap = torch.abs(eps_tar - eps_src).flatten(1).mean(dim=1)
             effective_mask = build_effective_mask(
                 dynamic_mask,
                 hard_roi,
                 soft_roi,
                 self.config.method,
                 step_idx,
-                len(self.pipe.scheduler.timesteps),
+                total_steps,
             )
             eps = eps_src + effective_mask * (eps_tar - eps_src)
+            applied_gap = torch.abs(eps - eps_src).flatten(1).mean(dim=1)
+            blend_strength = torch.where(src_tar_gap > 1e-8, applied_gap / src_tar_gap, torch.zeros_like(applied_gap))
             prev_latents = self.pipe.scheduler.step(eps, timestep, latents).prev_sample
             next_source_idx = min(step_idx + 1, len(self.pipe.scheduler.timesteps) - 1)
             anchor_mask = build_anchor_mask(
@@ -386,7 +405,7 @@ class SourceAnchorEditor:
                 soft_roi,
                 self.config.method,
                 step_idx,
-                len(self.pipe.scheduler.timesteps),
+                total_steps,
             )
             next_source_latents = torch.cat(
                 [source_latents[next_source_idx] for source_latents in source_latents_by_sample],
@@ -395,18 +414,53 @@ class SourceAnchorEditor:
             latents = anchor_mask * prev_latents + (1.0 - anchor_mask) * next_source_latents
 
             delta_per_sample = target_stats.get("delta_per_sample", [target_stats["delta"]] * batch_count)
+            timestep_value = float(timestep.item()) if hasattr(timestep, "item") else float(timestep)
+            latent_previews = None
+            if self.config.save.step_visualizations and self.config.save.step_save_latent_preview:
+                if any(writer is not None and writer.is_selected(step_idx) for writer in step_writers):
+                    latent_previews = self._decode_latent_batch(latents)
             for batch_index in range(batch_count):
-                step_debug[batch_index].append(
-                    {
-                        "step_idx": float(step_idx),
-                        "timestep": float(timestep.item()) if hasattr(timestep, "item") else float(timestep),
-                        "delta": float(delta_per_sample[batch_index]),
-                        "dynamic_mask_mean": float(dynamic_mask[batch_index].mean().item()),
-                        "effective_mask_mean": float(effective_mask[batch_index].mean().item()),
-                        "soft_roi_mean": float(soft_roi[batch_index].mean().item()),
-                        "hard_roi_mean": float(hard_roi[batch_index].mean().item()),
-                    }
-                )
+                trace_row = {
+                    "step_idx": float(step_idx),
+                    "timestep": timestep_value,
+                    "delta": float(delta_per_sample[batch_index]),
+                    "discrepancy_gap": float(discrepancy_gap[batch_index].item()),
+                    "src_tar_gap": float(src_tar_gap[batch_index].item()),
+                    "applied_gap": float(applied_gap[batch_index].item()),
+                    "blend_strength": float(blend_strength[batch_index].item()),
+                    "dynamic_mask_mean": float(dynamic_mask[batch_index].mean().item()),
+                    "effective_mask_mean": float(effective_mask[batch_index].mean().item()),
+                    "anchor_mask_mean": float(anchor_mask[batch_index].mean().item()),
+                    "soft_roi_mean": float(soft_roi[batch_index].mean().item()),
+                    "hard_roi_mean": float(hard_roi[batch_index].mean().item()),
+                }
+                step_debug[batch_index].append(trace_row)
+                writer = step_writers[batch_index]
+                if writer is not None:
+                    maps: dict[str, torch.Tensor] = {}
+                    if self.config.save.step_save_dynamic_mask:
+                        maps["dynamic_mask"] = dynamic_mask
+                    if self.config.save.step_save_effective_mask:
+                        maps["effective_mask"] = effective_mask
+                    if self.config.save.step_save_anchor_mask:
+                        maps["anchor_mask"] = anchor_mask
+                    if self.config.save.step_save_attention:
+                        maps["attention"] = aux["attention"]
+                    if self.config.save.step_save_discrepancy:
+                        maps["discrepancy"] = aux["discrepancy"]
+                    if self.config.save.step_save_latent_drift:
+                        maps["latent_drift"] = aux["latent_drift"]
+                    if self.config.save.step_save_roi:
+                        maps["soft_roi"] = soft_roi
+                        maps["hard_roi"] = hard_roi
+                    writer.record_step(
+                        step_idx=step_idx,
+                        timestep=timestep_value,
+                        batch_index=batch_index,
+                        trace_row=trace_row,
+                        maps=maps,
+                        latent_preview=latent_previews[batch_index] if latent_previews is not None else None,
+                    )
 
         edited_images = self._decode_latent_batch(latents)
         artifacts: list[EditArtifacts] = []
@@ -449,6 +503,8 @@ class SourceAnchorEditor:
                 )
                 overview_path = save_image(item.sample_output_dir / "overview.png", overview)
 
+            step_manifest = step_writers[batch_index].finish() if step_writers[batch_index] is not None else None
+            step_manifest_path = Path(step_manifest["manifest_path"]) if step_manifest is not None else None
             debug_json_path = write_json(
                 item.sample_output_dir / "debug.json",
                 {
@@ -464,6 +520,7 @@ class SourceAnchorEditor:
                     "batch_size": batch_count,
                     "batch_index": batch_index,
                     "steps": step_debug[batch_index],
+                    "step_artifacts": step_manifest,
                     "metrics": metrics_result,
                 },
             )
@@ -478,6 +535,7 @@ class SourceAnchorEditor:
                     roi_soft_path=item.roi_soft_path,
                     roi_hard_path=item.roi_hard_path,
                     debug_json_path=debug_json_path,
+                    step_manifest_path=step_manifest_path,
                 )
             )
         clear_cuda_memory()

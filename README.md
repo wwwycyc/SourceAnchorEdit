@@ -105,6 +105,7 @@ runs/
         roi_soft.png            # ROI visualization (soft mask)
         roi_hard.png            # ROI visualization (hard mask)
         overview.png            # complete comparison
+        steps/                  # optional per-step traces, diagnostics, and maps
         debug.json              # debug information
 ```
 
