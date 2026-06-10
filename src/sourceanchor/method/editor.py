@@ -221,6 +221,7 @@ class SourceAnchorEditor:
 
     @staticmethod
     def _load_optional_mask(sample: StandardSample, fallback_hard_roi: torch.Tensor) -> tuple[np.ndarray | None, str]:
+        del fallback_hard_roi
         if sample.mask_path is not None:
             if sample.mask_path.suffix.lower() == ".npy":
                 mask = np.load(sample.mask_path)
@@ -232,8 +233,7 @@ class SourceAnchorEditor:
             if mask.max(initial=0) > 1.0:
                 mask = mask / 255.0
             return np.clip(mask, 0.0, 1.0), "sample.mask_path"
-        mask = fallback_hard_roi[0, 0].detach().cpu().numpy().astype(np.float32)
-        return np.clip(mask, 0.0, 1.0), "roi.hard"
+        return None, "missing"
 
     @staticmethod
     def _load_optional_target_reference(sample: StandardSample) -> np.ndarray | None:

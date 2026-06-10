@@ -11,6 +11,28 @@ from sourceanchor.outputs.writer import write_json
 from sourceanchor.schemas import SampleMetadata, StandardSample
 
 
+def decode_piebench_rle(rle: list[int], *, height: int = 512, width: int = 512) -> np.ndarray:
+    """Decode PIE-Bench RLE [start0, len0, start1, len1, ...] into a binary mask."""
+    if height <= 0 or width <= 0:
+        raise ValueError("height and width must be positive")
+    mask = np.zeros(height * width, dtype=np.uint8)
+    for index in range(0, len(rle) - 1, 2):
+        start = int(rle[index])
+        length = int(rle[index + 1])
+        if start < 0 or length < 0:
+            raise ValueError("PIE-Bench RLE entries must be non-negative")
+        if start >= mask.size or length == 0:
+            continue
+        mask[start : min(start + length, mask.size)] = 1
+    mask = mask.reshape(height, width)
+    # Match the original PIE-Bench/PnPI evaluation helper.
+    mask[0, :] = 1
+    mask[-1, :] = 1
+    mask[:, 0] = 1
+    mask[:, -1] = 1
+    return mask
+
+
 class PIEBenchAdapter(DatasetAdapter):
     """Current officially supported dataset adapter for the standalone release."""
 
@@ -39,13 +61,26 @@ class PIEBenchAdapter(DatasetAdapter):
                 continue
             source_prompt = str(record.get("original_prompt") or record.get("source_prompt") or "").strip()
             editing_prompt = str(record.get("editing_prompt") or record.get("target_prompt") or "").strip()
+            editing_instruction = str(record.get("editing_instruction") or editing_prompt).strip()
             target_prompt = editing_prompt.replace("[", "").replace("]", "")
 
             sample_id = f"piebench_{row_index:06d}"
             sample_dir = output_dir / sample_id
             sample_dir.mkdir(parents=True, exist_ok=True)
             source_image_path = sample_dir / "source.png"
-            Image.open(image_path).convert("RGB").save(source_image_path)
+            source_image = Image.open(image_path).convert("RGB")
+            source_image.save(source_image_path)
+
+            mask_path: Path | None = None
+            rle = record.get("mask")
+            if isinstance(rle, list) and rle:
+                gt_mask = decode_piebench_rle(
+                    [int(value) for value in rle],
+                    height=source_image.height,
+                    width=source_image.width,
+                )
+                mask_path = sample_dir / "gt_mask.png"
+                Image.fromarray(np.uint8(gt_mask * 255)).save(mask_path)
 
             sample = StandardSample(
                 sample_id=sample_id,
@@ -55,9 +90,15 @@ class PIEBenchAdapter(DatasetAdapter):
                 metadata=SampleMetadata(
                     dataset=self.name,
                     record_id=str(record_id),
-                    edit_instruction=editing_prompt,
-                    extras={"source_dataset_root": str(self.dataset_root)},
+                    edit_instruction=editing_instruction,
+                    extras={
+                        "source_dataset_root": str(self.dataset_root),
+                        "editing_type_id": record.get("editing_type_id"),
+                        "blended_word": record.get("blended_word"),
+                        "has_gt_mask": mask_path is not None,
+                    },
                 ),
+                mask_path=mask_path,
             )
             samples.append(sample)
 

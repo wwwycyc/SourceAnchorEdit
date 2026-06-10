@@ -78,7 +78,8 @@ These are optional:
 - `target_reference_path`
   - only for optional evaluation or manual comparison
 - `mask_path`
-  - only for optional analysis or dataset-provided auxiliary data
+  - dataset-provided GT/edit mask used by masked metrics such as edit-region CLIP
+  - method-generated ROI masks must not be used here
 
 ## Explicit Non-Fields
 
