@@ -351,15 +351,11 @@ class MetricsCalculator:
         if mask is None:
             return None
         mask_arr = np.asarray(mask, dtype=np.float32)
-        if mask_arr.ndim == 3:
-            mask_arr = mask_arr[..., 0]
-        if mask_arr.max(initial=0) > 1.0:
-            mask_arr = mask_arr / 255.0
+        if mask_arr.ndim == 2:
+            mask_arr = mask_arr[:, :, None]
         if mask_arr.shape[:2] != image.shape[:2]:
-            mask_image = Image.fromarray(np.uint8(np.clip(mask_arr, 0.0, 1.0) * 255.0))
-            mask_image = mask_image.resize((image.shape[1], image.shape[0]), resample=Image.NEAREST)
-            mask_arr = np.asarray(mask_image, dtype=np.float32) / 255.0
-        return mask_arr[:, :, None]
+            raise ValueError("Mask shape must match image spatial dimensions.")
+        return mask_arr
 
     def _apply_mask(self, image: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
         image_arr = self._to_uint8(image).astype(np.float32)
@@ -449,8 +445,8 @@ class MetricsCalculator:
         mask_pred: np.ndarray | None = None,
     ) -> float:
         model = self._lazy_structure_distance()
-        ref = self._apply_mask(reference, mask_ref) / 255.0
-        pred = self._apply_mask(prediction, mask_pred) / 255.0
+        ref = self._apply_mask(reference, mask_ref)
+        pred = self._apply_mask(prediction, mask_pred)
         ref_tensor = torch.from_numpy(np.transpose(ref, axes=(2, 0, 1))).unsqueeze(0).to(self.device)
         pred_tensor = torch.from_numpy(np.transpose(pred, axes=(2, 0, 1))).unsqueeze(0).to(self.device)
         with torch.no_grad():

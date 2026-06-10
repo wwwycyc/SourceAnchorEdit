@@ -95,7 +95,7 @@ class SaveConfig:
 @dataclass
 class MetricsConfig:
     """Configuration for metrics calculation."""
-    enable_metrics: bool = False
+    enable_metrics: bool = True
     enable_lpips: bool = True
     enable_psnr: bool = True
     enable_mse: bool = True
